@@ -63,8 +63,8 @@ def hint(markup: str, *, tone: str = "info") -> pn.pane.HTML:
     return _html(f"<div class='qcm-hint {safe_tone}'>{markup}</div>")
 
 
-def card(*objects, title: str | None = None, collapsible: bool = False, collapsed: bool = False,
-         css_classes: list[str] | None = None) -> pn.Card:
+def card(*objects: pn.viewable.Viewable, title: str | None = None, collapsible: bool = False,
+         collapsed: bool = False, css_classes: list[str] | None = None) -> pn.Card:
     classes = ["qcm-card", *(css_classes or [])]
     return pn.Card(
         *objects,
@@ -78,5 +78,5 @@ def card(*objects, title: str | None = None, collapsible: bool = False, collapse
     )
 
 
-def toolbar(*objects) -> pn.Row:
+def toolbar(*objects: pn.viewable.Viewable) -> pn.Row:
     return pn.Row(*objects, margin=0, sizing_mode="stretch_width", css_classes=["qcm-toolbar"])

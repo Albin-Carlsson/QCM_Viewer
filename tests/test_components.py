@@ -21,6 +21,12 @@ def test_section_title_has_classes_and_escapes():
     assert "Step 1" in out
 
 
+def test_section_title_escapes_markup():
+    out = _html(c.section_title("<b>Title</b>", eyebrow="<em>Eyebrow</em>"))
+    assert "&lt;b&gt;" in out and "&lt;em&gt;" in out
+    assert "<b>Title</b>" not in out
+
+
 def test_stat_badge_tone_class():
     out = _html(c.stat_badge("Mass", "12.3 ng/cm²", tone="accent"))
     assert "qcm-stat accent" in out
@@ -31,6 +37,14 @@ def test_metric_strip_renders_each_row():
     out = _html(c.metric_strip([("Range", "100 s", "0–100"), ("Mean", "5", "")]))
     assert "qcm-metric-strip" in out
     assert "Range" in out and "Mean" in out
+
+
+def test_metric_strip_renders_caption_and_escapes():
+    out = _html(c.metric_strip([("<lbl>", "<val>", "<cap>")]))
+    # Caption branch is rendered and all three fields are escaped.
+    assert "&lt;cap&gt;" in out
+    assert "&lt;lbl&gt;" in out and "&lt;val&gt;" in out
+    assert "<lbl>" not in out
 
 
 def test_empty_state_text():
