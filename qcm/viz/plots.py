@@ -74,11 +74,75 @@ def _xy(value_df: pl.DataFrame, group: int, max_points: int = MAX_PLOT_POINTS):
 
 
 def _legend_mute_hook(plot, _element):
-    """Click a legend entry to mute/unmute its trace."""
+    """Click a legend entry to mute/unmute its trace and hover target.
+
+    Bokeh's legend ``mute`` policy only changes renderer opacity. HoverTool
+    still includes muted renderers unless we explicitly keep its renderer list
+    in sync with the active legend entries.
+    """
     try:
+        from bokeh.models import CustomJS, HoverTool
+
+        fig = plot.state
+        hover_renderers = []
+        seen = set()
         for legend in plot.state.legend:
             legend.click_policy = "mute"
             legend.label_text_font_size = "9pt"
+            for item in legend.items:
+                for renderer in item.renderers:
+                    if getattr(renderer, "glyph", None) is None:
+                        continue
+                    if id(renderer) in seen:
+                        continue
+                    hover_renderers.append(renderer)
+                    seen.add(id(renderer))
+
+        hovers = list(fig.select(HoverTool))
+        if not hover_renderers or not hovers:
+            return
+
+        for hover in hovers:
+            hover.renderers = [
+                renderer
+                for renderer in hover_renderers
+                if not renderer.muted and renderer.visible
+            ]
+
+        sync_hover = CustomJS(
+            args={"hovers": hovers, "renderers": hover_renderers},
+            code="""
+                const active = renderers.filter((renderer) => {
+                    return !renderer.muted && renderer.visible !== false
+                })
+                for (const hover of hovers) {
+                    hover.renderers = active
+                    hover.change.emit()
+                }
+            """,
+        )
+        for renderer in hover_renderers:
+            renderer.js_on_change("muted", sync_hover)
+            renderer.js_on_change("visible", sync_hover)
+    except Exception:
+        pass
+
+
+def _vline_hover_hook(plot, _element):
+    """Switch the shared hover to vertical-line mode.
+
+    Default ``mouse`` hover does a 2-D hit test against every line on each mouse
+    move; with several decimated overtone traces that cost is what makes hover
+    feel laggy. ``vline`` mode tests only the cursor's x position once and
+    reports each trace's value there — cheaper per move and the multi-overtone
+    readout QCM users expect. Only meaningful for overlays whose traces share
+    the x-axis (time-domain and frequency-sweep plots).
+    """
+    try:
+        from bokeh.models import HoverTool
+
+        for tool in plot.state.select(HoverTool):
+            tool.mode = "vline"
     except Exception:
         pass
 
@@ -180,8 +244,8 @@ def timeline(
     return hv.Overlay(elements).opts(
         hv.opts.Overlay(
             title=title, height=height, responsive=True, legend_position="right",
-            active_tools=["wheel_zoom"], tools=["hover", "crosshair", "box_zoom", "reset"],
-            hooks=[_legend_mute_hook, _saved_region_label_hook(annotation_spans or [])], show_grid=True,
+            active_tools=["wheel_zoom"], tools=["hover", "box_zoom", "reset"],
+            hooks=[_vline_hover_hook, _legend_mute_hook, _saved_region_label_hook(annotation_spans or [])], show_grid=True,
         ),
         hv.opts.Curve(tools=["hover"]),
     )
@@ -244,8 +308,8 @@ def dual_axis_qcmd(
     return hv.Overlay(elements).opts(
         hv.opts.Overlay(
             title=title, height=HERO_HEIGHT, responsive=True, legend_position="right",
-            active_tools=["wheel_zoom"], tools=["hover", "crosshair", "box_zoom", "reset"],
-            hooks=[_twin_axis_hook(d_lo, d_hi, "ΔD  [×10⁻⁶]"), _legend_mute_hook, _saved_region_label_hook(annotation_spans or [])],
+            active_tools=["wheel_zoom"], tools=["hover", "box_zoom", "reset"],
+            hooks=[_twin_axis_hook(d_lo, d_hi, "ΔD  [×10⁻⁶]"), _vline_hover_hook, _legend_mute_hook, _saved_region_label_hook(annotation_spans or [])],
             show_grid=True,
         ),
         hv.opts.Curve(tools=["hover"]),
@@ -283,23 +347,51 @@ def df_fingerprint(norm_df: pl.DataFrame, d_df: pl.DataFrame, groups: list[int],
         hv.opts.Overlay(
             title="Df plot — ΔD vs Δf/n (viscoelastic fingerprint)",
             height=PLOT_HEIGHT, responsive=True, legend_position="right",
-            active_tools=["wheel_zoom"], tools=["hover", "crosshair", "box_zoom", "reset"],
+            active_tools=["wheel_zoom"], tools=["hover", "box_zoom", "reset"],
             hooks=[_legend_mute_hook], show_grid=True,
         ),
         hv.opts.Curve(tools=["hover"]),
     )
 
 
-def waterfall(df: pl.DataFrame, title: str):
+WATERFALL_PANEL_HEIGHT = 240
+
+
+def waterfall(df: pl.DataFrame, orders: dict[int, int] | None = None) -> list:
+    """One conductance-over-time heatmap per overtone.
+
+    Overtones sit megahertz apart while each resonance band is only ~kHz wide,
+    so a single shared frequency axis squashes every band into an unreadable
+    stripe. Splitting into one rasterized panel per group gives each overtone
+    its own tight frequency axis. Time (elapsed seconds) is on x because
+    Datashader rejects uint timestamps; conductance is the color.
+    """
     if df.is_empty():
-        return empty("No waterfall data")
-    # Datashader rejects uint timestamps; we plot elapsed seconds anyway.
-    return df.hvplot.scatter(
-        x=X, y="frequency", c="conductance",
-        rasterize=True, dynspread=False, cmap="viridis",
-        responsive=True, height=PLOT_HEIGHT, title=title,
-        xlabel=X_LABEL, ylabel="Frequency [Hz]", clabel="Conductance",
-    ).opts(active_tools=["wheel_zoom"], tools=["hover", "crosshair", "box_zoom", "reset"], show_grid=True)
+        return [empty("No waterfall data")]
+    orders = orders or {}
+    groups = sorted(int(g) for g in df["group"].unique().to_list())
+    panels = []
+    for g in groups:
+        sub = df.filter(pl.col("group") == g)
+        if sub.is_empty():
+            continue
+        n = orders.get(g)
+        who = f"n={n}" if n and n > 1 else f"group {g}"
+        fcenter = float(sub["frequency"].median())
+        panels.append(
+            sub.hvplot.scatter(
+                x=X, y="frequency", c="conductance",
+                rasterize=True, dynspread=True, cmap="viridis",
+                responsive=True, height=WATERFALL_PANEL_HEIGHT,
+                title=f"{who} · f ≈ {fcenter:,.0f} Hz",
+                xlabel=X_LABEL, ylabel="Frequency [Hz]", clabel="Conductance",
+            ).opts(
+                active_tools=["wheel_zoom"], tools=["hover", "box_zoom", "reset"],
+                show_grid=True, axiswise=True, shared_axes=False,
+            )
+        )
+    return panels or [empty("No waterfall data")]
+
 
 SWEEP_PANEL_HEIGHT = 220
 
@@ -454,8 +546,8 @@ def sweep_curves(df: pl.DataFrame, orders: dict[int, int] | None = None) -> list
                     shared_axes=False,
                     legend_position="top_right",
                     active_tools=["wheel_zoom"],
-                    tools=["hover", "crosshair", "box_zoom", "reset"],
-                    hooks=[_force_x_range_hook(lo, hi), _legend_mute_hook],
+                    tools=["hover", "box_zoom", "reset"],
+                    hooks=[_force_x_range_hook(lo, hi), _vline_hover_hook, _legend_mute_hook],
                     show_grid=True,
                 ),
                 hv.opts.Curve(tools=["hover"]),
@@ -465,14 +557,69 @@ def sweep_curves(df: pl.DataFrame, orders: dict[int, int] | None = None) -> list
     return panels or [empty("No sweep")]
 
 
+def _zoom_scale_markers_hook(ref_x_span: float, ref_y_span: float, max_scale: float = 12.0):
+    """Grow scatter markers as the view zooms in.
+
+    Bokeh marker ``size`` is in screen pixels, so points stay the same size at
+    every zoom level — zooming into a sparse cloud feels like it reveals less.
+    This attaches a JS callback that rescales every marker glyph by how far the
+    current view is zoomed in relative to the full data extent, so points get
+    bigger the closer you look (clamped to ``max_scale``×). Kept client-side so
+    it costs nothing on the server and stays smooth.
+    """
+    def hook(plot, _element):
+        try:
+            from bokeh.models import CustomJS
+
+            fig = plot.state
+            glyphs = [
+                r.glyph for r in fig.renderers
+                if hasattr(getattr(r, "glyph", None), "size")
+            ]
+            if not glyphs:
+                return
+            base = float(getattr(glyphs[0], "size", 4) or 4)
+            callback = CustomJS(
+                args=dict(
+                    glyphs=glyphs, xr=fig.x_range, yr=fig.y_range,
+                    base=base, refx=ref_x_span, refy=ref_y_span, maxs=max_scale,
+                ),
+                code="""
+                    const xs = xr.end - xr.start
+                    const ys = yr.end - yr.start
+                    if (!(xs > 0) || !(ys > 0)) { return }
+                    let scale = Math.sqrt((refx / xs) * (refy / ys))
+                    if (!(scale > 0)) { scale = 1 }
+                    scale = Math.min(Math.max(scale, 1.0), maxs)
+                    const size = base * scale
+                    for (const glyph of glyphs) { glyph.size = size }
+                """,
+            )
+            for rng in (fig.x_range, fig.y_range):
+                rng.js_on_change("start", callback)
+                rng.js_on_change("end", callback)
+        except Exception:
+            pass
+
+    return hook
+
+
 def iq_scatter(df: pl.DataFrame, title: str):
     if df.is_empty():
         return empty("No I/Q")
-    # Do not rasterize the I/Q scatter. Rasterized points stay pixel-sized when
-    # zooming, which makes zoom feel like it reveals less information. Native
-    # Bokeh markers keep their visual size and remain inspectable.
+    # Native (non-rasterized) markers so each point stays crisp and inspectable;
+    # the I/Q cloud is small (tens of points per sweep). Markers are pixel-sized,
+    # so _zoom_scale_markers_hook grows them as you zoom in to keep the cloud
+    # readable instead of shrinking into specks.
+    ix = df["raw_i"].drop_nulls()
+    iy = df["raw_q"].drop_nulls()
+    ref_x = float(ix.max() - ix.min()) if ix.len() else 1.0
+    ref_y = float(iy.max() - iy.min()) if iy.len() else 1.0
     return df.hvplot.scatter(
         x="raw_i", y="raw_q", by="group",
         responsive=True, height=PLOT_HEIGHT, title=title, size=5, alpha=0.65,
         xlabel="Raw I [a.u.]", ylabel="Raw Q [a.u.]",
-    ).opts(active_tools=["wheel_zoom"], tools=["hover", "box_zoom", "reset"], show_grid=True)
+    ).opts(
+        active_tools=["wheel_zoom"], tools=["hover", "box_zoom", "reset"], show_grid=True,
+        hooks=[_zoom_scale_markers_hook(ref_x or 1.0, ref_y or 1.0)],
+    )

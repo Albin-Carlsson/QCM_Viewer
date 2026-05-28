@@ -26,7 +26,14 @@ class BasePage:
         if controls is not None:
             children.append(controls)
         children.append(body)
-        return pn.Card(*children, title=title, collapsible=False, margin=(4, 0), sizing_mode="stretch_width")
+        return pn.Card(
+            *children,
+            title=title,
+            collapsible=False,
+            margin=0,
+            sizing_mode="stretch_width",
+            css_classes=["viewer-card"],
+        )
 
     def attach_tap(self, obj):
         try:
@@ -38,7 +45,7 @@ class BasePage:
 
     @staticmethod
     def hint(text: str):
-        return pn.pane.Markdown(f"<small>{text}</small>", sizing_mode="stretch_width")
+        return pn.pane.Markdown(f"<small>{text}</small>", margin=0, sizing_mode="stretch_width")
 
 
 class OverviewPage(BasePage):
@@ -63,19 +70,23 @@ class OverviewPage(BasePage):
             return pn.pane.Alert(f"QCM-D plot failed: {exc}", alert_type="danger")
 
     def view(self):
-        controls = pn.Card(
-            self.controls.current_range_controls(),
-            self.controls.zero_reference_controls(),
-            title="Ranges",
-            collapsible=False,
+        controls = pn.Column(
+            pn.pane.Markdown("**Ranges**", margin=0, sizing_mode="stretch_width"),
+            self.controls.overview_range_controls(),
+            margin=0,
             sizing_mode="stretch_width",
+            css_classes=["compact-section"],
         )
         return pn.Column(
-            self.hint(
-                "Current range controls what you inspect. Set zero = current range only when that range is a stable reference period; it only changes Δ-value calculations."
+            self.panel(
+                self.hero_plot,
+                *self.controls.signal_inputs,
+                title="QCM-D overview",
+                controls=controls,
             ),
-            self.panel(self.hero_plot, *self.controls.signal_inputs, title="QCM-D overview", controls=controls),
+            margin=0,
             sizing_mode="stretch_width",
+            css_classes=["viewer-page", "overview-page"],
         )
 
 
@@ -87,13 +98,14 @@ class ExplorePage(BasePage):
             state = self.controls.state()
             value_df, elapsed = self.data.value_df(state)
             q = quantity(state.quantity)
-            title = f"{q.label} ({q.unit or 'unitless'}) — current range · {value_df.height} points · {elapsed:.0f} ms"
+            title = f"{q.label} · {value_df.height:,} points · {elapsed:.0f} ms"
             plot = plots.timeline(
                 value_df,
                 q,
                 state.groups,
                 state.orders,
                 title,
+                height=240,
                 annotation_spans=self.data.annotation_spans(state),
                 baseline=state.baseline_s if q.referenced else None,
             )
@@ -122,9 +134,10 @@ class ExplorePage(BasePage):
                 "mean_abs", "rms", "mean_abs_step", "step_std", "sum", "sum_abs", "compute_ms",
             ]
             stats = stats.select([c for c in ordered if c in stats.columns])
+            table_height = min(360, max(116, 46 + stats.height * 34))
             return pn.widgets.Tabulator(
                 stats.to_pandas(),
-                height=440,
+                height=table_height,
                 layout="fit_data_fill",
                 show_index=False,
                 sizing_mode="stretch_width",
@@ -139,7 +152,8 @@ class ExplorePage(BasePage):
         self.actions.refresh_marker_options()
         if not anns:
             return pn.pane.Markdown(
-                "_No saved regions yet._ Choose a current range, type a name, then click **Save current range**."
+                "_No saved regions yet._ Choose a current range, type a name, then click "
+                "**Save current range**."
             )
         rows = []
         for a in anns:
@@ -172,47 +186,55 @@ class ExplorePage(BasePage):
             self.actions.delete_annotation_by_row(event.row)
 
     def controls_for_quantity(self, quantity_key: str):
+        _ = quantity_key  # Keep this reactive dependency for quantity changes.
         return pn.Column(
-            self.controls.current_range_controls(),
-            self.controls.zero_reference_if_needed(quantity_key),
+            self.controls.analyze_range_controls(),
+            margin=0,
             sizing_mode="stretch_width",
+            css_classes=["compact-section"],
         )
 
     def view(self):
         range_controls = pn.bind(self.controls_for_quantity, self.controls.quantity_select)
-        analyze_controls = pn.Card(
-            pn.pane.Markdown(
-                "**1. Choose what to inspect.** The current range controls the plot, statistics, and exports.",
-                sizing_mode="stretch_width",
-            ),
+        analyze_controls = pn.Column(
             self.controls.quantity_select,
             range_controls,
-            title="Current range",
-            collapsible=False,
+            margin=0,
             sizing_mode="stretch_width",
+            css_classes=["compact-section", "analyze-controls"],
         )
         save_region_controls = pn.Card(
             pn.pane.Markdown(
-                "**3. Optional: save the current range.** Saved regions appear as overlays on plots and can be exported to a notebook. "
+                "**3. Optional: save the current range.** Saved regions appear as overlays on plots "
+                "and can be exported to a notebook. "
                 "Use them for artifacts, rinse/sample steps, or any interval you want to return to later.",
+                margin=0,
                 sizing_mode="stretch_width",
             ),
             self.controls.region_type,
             self.controls.region_label,
-            pn.Row(self.controls.mark_point_button, self.controls.mark_window_button, sizing_mode="stretch_width"),
+            pn.Row(
+                self.controls.mark_point_button,
+                self.controls.mark_window_button,
+                margin=0,
+                sizing_mode="stretch_width",
+            ),
             title="Save a region",
             collapsible=False,
+            margin=0,
             sizing_mode="stretch_width",
         )
         notebook_controls = pn.Card(
             pn.pane.Markdown(
                 "Choose **Current range** or a saved range. The notebook opens directly on that interval.",
+                margin=0,
                 sizing_mode="stretch_width",
             ),
             self.controls.marker_select,
             self.actions.export_nb_dl,
             title="Export notebook",
             collapsible=False,
+            margin=0,
             sizing_mode="stretch_width",
         )
         saved_regions = pn.Card(
@@ -220,18 +242,31 @@ class ExplorePage(BasePage):
             notebook_controls,
             title="Saved regions",
             collapsible=False,
+            margin=0,
             sizing_mode="stretch_width",
         )
         return pn.Column(
             self.hint(
-                "Mental model: Current range = what you inspect. Zero/reference range = zero for Δ-values only. "
+                "Mental model: Current range = what you inspect. Zero/reference range = zero "
+                "for Δ-values only. "
                 "Saved regions = named intervals you can see again or export."
             ),
-            self.panel(self.quantity_plot, *self.controls.explore_inputs, title="2. Plot for the current range", controls=analyze_controls),
-            self.panel(self.full_stats_table, *self.controls.explore_inputs, title="Statistics for the current range"),
+            self.panel(
+                self.quantity_plot,
+                *self.controls.explore_inputs,
+                title="Plot for the current range",
+                controls=analyze_controls,
+            ),
+            self.panel(
+                self.full_stats_table,
+                *self.controls.explore_inputs,
+                title="Statistics for the current range",
+            ),
             save_region_controls,
             saved_regions,
+            margin=0,
             sizing_mode="stretch_width",
+            css_classes=["viewer-page"],
         )
 
 
@@ -259,7 +294,8 @@ class SweepPage(BasePage):
     def waterfall_plot(self):
         try:
             state = self.controls.state()
-            return plots.waterfall(self.data.waterfall_df(state), "Conductance waterfall")
+            panels = plots.waterfall(self.data.waterfall_df(state), orders=state.orders)
+            return pn.Column(*panels, sizing_mode="stretch_width")
         except Exception as exc:  # pragma: no cover
             return pn.pane.Alert(f"Waterfall failed: {exc}", alert_type="danger")
 
@@ -272,13 +308,23 @@ class SweepPage(BasePage):
             self.controls.frequency_band,
             title="Sweep controls",
             collapsible=False,
+            margin=0,
             sizing_mode="stretch_width",
         )
         return pn.Column(
-            self.hint("Raw sweep tools live here. The sweep number also updates when you click a timeline plot."),
+            self.hint(
+                "Raw sweep tools live here. The sweep number also updates when you click a timeline plot."
+            ),
             controls,
             self.panel(self.sweep_plot, *self.controls.sweep_inputs, title="Resonance curves"),
             self.panel(self.iq_plot, *self.controls.sweep_inputs, title="I/Q scatter"),
-            self.panel(self.waterfall_plot, *self.controls.signal_inputs, self.controls.waterfall_band_input, title="Waterfall"),
+            self.panel(
+                self.waterfall_plot,
+                *self.controls.signal_inputs,
+                self.controls.waterfall_band_input,
+                title="Waterfall",
+            ),
+            margin=0,
             sizing_mode="stretch_width",
+            css_classes=["viewer-page"],
         )

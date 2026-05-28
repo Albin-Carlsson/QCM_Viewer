@@ -33,7 +33,10 @@ Open the browser page printed by Panel, usually `http://localhost:5006/panel_app
 
 ## Architectural discussion
 
-QCM Viewer is a local-first, file-backed analysis application. The central architectural choice is that an imported run is not an in-memory object and not a database server. It is a directory of Parquet and JSON files with a small manifest that defines the contract between ingestion, the Python API, the Panel UI, and exported notebooks.
+QCM Viewer is a local-first, file-backed analysis application. 
+The central architectural choice is that an imported run is not an in-memory object and not a database server. 
+It is a directory of Parquet and JSON files with a small manifest that defines the contract between ingestion, 
+the Python API, the Panel UI, and exported notebooks.
 
 ```text
 source parquet file(s)
@@ -60,7 +63,10 @@ qcm.viz.data + qcm.viz.science
 qcm.viz.controls/pages/plots/actions/layout
 ```
 
-This structure keeps large measurement data on disk, makes the run folder portable, and gives every consumer the same read path. The UI, notebook export, CLI diagnostics, and Python API all open a `QCMRun` instead of each inventing their own Parquet access pattern.
+This structure keeps large measurement data on disk, makes the run folder portable, 
+and gives every consumer the same read path. 
+The UI, notebook export, CLI diagnostics, 
+and Python API all open a `QCMRun` instead of each inventing their own Parquet access pattern.
 
 ### Run directory contract
 
@@ -74,11 +80,22 @@ fit_center, fit_gamma, fit_fwhm
 
 The run directory separates data by access pattern:
 
-- `manifest.json` records schema version, run id, source path, time bounds, available columns, groups, pyramid levels, relative paths, and ingest metadata.
-- `raw/part-*.parquet` stores the original frequency-point table in manageable chunks. This is the authoritative data source for raw sweep inspection, focused exports, and frequency-band queries.
-- `sweeps/index.parquet` stores one row per `sequence` and `group`. It is the efficient source for fit-parameter timelines because `fit_center`, `fit_gamma`, and `fit_fwhm` are constant across the frequency points of one sweep.
-- `pyramid/<level>/data.parquet` stores precomputed time buckets such as `100ms`, `1s`, `10s`, `1min`, `10min`, and `1h`. These tables support broad overview plots without scanning a full raw file.
+- `manifest.json` records schema version, run id, source path, time bounds, available columns, groups, pyramid levels, 
+- relative paths, and ingest metadata.
+
+- `raw/part-*.parquet` stores the original frequency-point table in manageable chunks. 
+- This is the authoritative data source for raw sweep inspection, focused exports, and frequency-band queries.
+
+- `sweeps/index.parquet` stores one row per `sequence` and `group`. 
+- It is the efficient source for fit-parameter timelines because `fit_center`, `fit_gamma`, and `fit_fwhm` 
+- are constant across the frequency points of one sweep.
+
+- `pyramid/<level>/data.parquet` stores precomputed time buckets such as 
+- `100ms`, `1s`, `10s`, `1min`, `10min`, and `1h`. 
+- These tables support broad overview plots without scanning a full raw file.
+
 - `annotations.json` stores user-created saved regions and markers.
+
 - `expressions.json` is reserved for run-local derived expressions.
 
 Timestamps are stored as integer microseconds. The UI converts them to elapsed seconds relative to the run start so sliders, axes, and notebooks use human-scale values while the persisted data keeps exact timestamps.
