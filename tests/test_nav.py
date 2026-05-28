@@ -40,3 +40,6 @@ def test_reference_hint_only_when_referenced_and_unset():
     assert nav.needs_reference_hint(True, (0.0, 20.0), 100.0) is False
     # Absolute quantity -> never hint.
     assert nav.needs_reference_hint(False, (0.0, 100.0), 100.0) is False
+    # Compares against span_s, not a hardcoded value: full-span at a different span.
+    assert nav.needs_reference_hint(True, (0.0, 200.0), 200.0) is True
+    assert nav.needs_reference_hint(True, (0.0, 100.0), 200.0) is False

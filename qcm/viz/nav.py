@@ -48,9 +48,9 @@ def prev_step(index: int) -> int:
     return clamp_step(index - 1)
 
 
-def brush_target_for_step(step_id: str) -> str:
+def brush_target_for_step(step_key: str) -> str:
     """Which range a plot box-drag should set, given the active step."""
-    return _BRUSH_BY_STEP.get(step_id, "current")
+    return _BRUSH_BY_STEP.get(step_key, "current")
 
 
 def needs_reference_hint(
