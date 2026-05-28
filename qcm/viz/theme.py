@@ -11,8 +11,16 @@ from dataclasses import dataclass
 
 ACCENT = "#2563eb"
 HEADER_BG = "#0f172a"
-PLOT_HEIGHT = 320
-HERO_HEIGHT = 460
+# Standardized plot sizing. Keep all plot dimensions here so pages stay consistent.
+HERO_HEIGHT = 440          # full-run QCM-D overview/reference plots; compact enough for one-screen pages
+PLOT_HEIGHT = 340           # main analysis timelines
+COMPACT_PLOT_HEIGHT = 220   # secondary/fingerprint plots
+SWEEP_PANEL_HEIGHT = 260    # one raw sweep panel
+WATERFALL_PANEL_HEIGHT = 320
+
+# Compact workbench spacing
+SECTION_GAP = 8
+CARD_PADDING = 8
 
 # Max points sent to the browser *per line*. Pyramid frames can carry tens of
 # thousands of points per group when the sweep rate is high; a plot is ~1200px

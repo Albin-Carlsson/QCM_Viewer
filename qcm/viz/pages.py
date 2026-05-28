@@ -32,7 +32,7 @@ class BasePage:
         *dependencies,
         title: str,
         controls=None,
-        collapsible: bool = True,
+        collapsible: bool = False,
         collapsed: bool = False,
         controls_position: str = "top",
     ):
@@ -181,11 +181,33 @@ class BasePage:
         except Exception:
             return None
 
-    def with_phase_labels(self, plot, df: pl.DataFrame | None = None):
+    @staticmethod
+    def _force_plot_height_hook(height: int):
+        def hook(plot, _element):
+            try:
+                fig = plot.state
+                fig.height = int(height)
+                fig.min_height = int(height)
+                fig.sizing_mode = "stretch_width"
+            except Exception:
+                pass
+        return hook
+
+    def force_plot_height(self, plot, height: int):
+        try:
+            return plot.opts(
+                hv.opts.Overlay(height=height, responsive=True, hooks=[self._force_plot_height_hook(height)]),
+                hv.opts.Curve(height=height, responsive=True),
+            )
+        except Exception:
+            return plot
+
+    def with_phase_labels(self, plot, df: pl.DataFrame | None = None, height: int | None = None):
         try:
             y = self._phase_label_y(df) if df is not None else 0.0
             labels = self.phase_label_overlay(y)
-            return plot * labels if labels is not None else plot
+            out = plot * labels if labels is not None else plot
+            return self.force_plot_height(out, height) if height is not None else out
         except Exception:
             return plot
 

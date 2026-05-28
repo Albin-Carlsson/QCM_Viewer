@@ -7,6 +7,7 @@ import panel as pn
 
 from .. import plots
 from ..components import hint
+from ..theme import HERO_HEIGHT
 from ._base import BaseStep
 
 
@@ -21,26 +22,37 @@ class ReferenceStep(BaseStep):
                 baseline=state.baseline_s,
                 annotation_spans=self.data.annotation_spans(state),
                 window=state.baseline_s, select_x=True,
+                height=HERO_HEIGHT,
             )
-            return self.interactive_plot(plot)
+            return self.interactive_plot(self.force_plot_height(plot, HERO_HEIGHT))
         except Exception as exc:  # pragma: no cover
             return pn.pane.Alert(f"Reference plot failed: {exc}", alert_type="danger")
 
+    def compact_reference_controls(self):
+        return pn.Row(
+            pn.Column(
+                self.controls.plot_tools_row(include_quantity=False),
+                self.controls.zero_reference_controls(),
+                margin=0,
+                sizing_mode="stretch_width",
+            ),
+            width_policy="max",
+            margin=0,
+            sizing_mode="stretch_width",
+            css_classes=["compact-two-column", "reference-controls-row"],
+        )
+
     def view(self):
         guidance = hint(
-            "Drag on the plot or edit the numbers to choose a quiet, stable window. "
-            "Δf, Δf/n, ΔD and Sauerbrey mass are measured relative to this window.",
+            "Drag on the plot or edit the numbers to choose a quiet, stable reference window.",
             tone="info",
-        )
-        controls = pn.Column(
-            self.controls.zero_reference_controls(),
-            margin=0, sizing_mode="stretch_width", css_classes=["compact-section"],
         )
         return pn.Column(
             guidance,
             self.panel(
                 self.reference_plot, *self.controls.signal_inputs, self.controls.plot_reset_version,
-                title="Reference window", controls=controls, controls_position="top",
+                title="Reference window", controls=self.compact_reference_controls(),
+                controls_position="bottom", collapsible=False,
             ),
             margin=0, sizing_mode="stretch_width", css_classes=["workbench-page", "viewer-page"],
         )

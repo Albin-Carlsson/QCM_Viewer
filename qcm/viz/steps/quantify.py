@@ -1,22 +1,73 @@
 """Quantify step: selected-quantity timeline, statistics, and fingerprint."""
 from __future__ import annotations
 
+from dataclasses import replace
+
 import panel as pn
 import polars as pl
 
 from .. import plots, science
 from ..components import hint
 from ..nav import needs_reference_hint
-from ..theme import quantity
+from ..theme import COMPACT_PLOT_HEIGHT, PLOT_HEIGHT, quantity
 from ._base import BaseStep
 
 
 class QuantifyStep(BaseStep):
     """Quantity plot, focused statistics, and fingerprint analysis."""
 
+    def target_state(self):
+        """Return the ViewState for the selected Quantify analysis target.
+
+        Current range uses the live slider. A saved marker produces a temporary
+        state whose time range is exactly the marker. This keeps target switching
+        local to Quantify and avoids permanently overwriting the current range.
+        """
+        state = self.controls.state()
+        selected = self.controls.analysis_region_select.value
+        if not selected or selected == "__current__":
+            return state
+        for ann in self.data.annotations():
+            if ann.id == selected and ann.type == "range" and ann.t1 is not None:
+                start_s = (ann.t0 - self.data.info.t0_us) / 1_000_000
+                end_s = (ann.t1 - self.data.info.t0_us) / 1_000_000
+                return replace(state, t_range_s=(float(start_s), float(end_s)))
+        return state
+
+    def selected_target_summary_table(self):
+        try:
+            state = self.target_state()
+            summary = self.data.region_summary(state)
+            if summary.is_empty():
+                return self.empty_state("No data in the selected analysis target.")
+            cols = [c for c in ["df_n", "dD", "mass", "Q", "dD_per_df"] if c in summary.columns]
+            means = summary.select([pl.col(c).mean().alias(c) for c in cols]).to_dicts()[0]
+            start, end = state.t_range_s
+            duration = max(0.0, float(end) - float(start))
+            rows = [
+                ("Range", f"{duration:,.2f} s", f"{start:,.2f}–{end:,.2f} s"),
+                ("Mean Δf/n", self._fmt(means.get("df_n"), 2, " Hz"), ""),
+                ("Mean ΔD", self._fmt(means.get("dD"), 3, " ×10⁻⁶"), ""),
+                ("Mass", self._fmt(means.get("mass"), 1, " ng/cm²"), ""),
+                ("Mean Q", self._fmt(means.get("Q"), 0), ""),
+                ("ΔD/Δf", self._fmt(means.get("dD_per_df"), 4), ""),
+            ]
+            table = pl.DataFrame(rows, schema=["Metric", "Value", "Range"], orient="row")
+            return pn.widgets.Tabulator(
+                table.to_pandas(),
+                height=168,
+                layout="fit_data_fill",
+                show_index=False,
+                sizing_mode="stretch_width",
+                disabled=True,
+                css_classes=["summary-table", "target-summary-table"],
+            )
+        except Exception as exc:  # pragma: no cover
+            return pn.pane.Alert(f"Target summary failed: {exc}", alert_type="danger")
+
     def quantity_plot(self):
         try:
-            state = self.controls.state()
+            state = self.target_state()
             value_df, elapsed = self.data.value_df(state)
             q = quantity(state.quantity)
             title = f"{q.label} · {value_df.height:,} points · {elapsed:.0f} ms"
@@ -26,18 +77,18 @@ class QuantifyStep(BaseStep):
                 state.groups,
                 state.orders,
                 title,
-                height=300,
+                height=PLOT_HEIGHT,
                 annotation_spans=self.data.annotation_spans(state),
                 baseline=state.baseline_s if q.referenced else None,
                 select_x=True,
             )
-            plot = self.with_phase_labels(plot, value_df)
-            return self.interactive_plot(plot)
+            plot = self.with_phase_labels(plot, value_df, height=PLOT_HEIGHT)
+            return self.interactive_plot(self.force_plot_height(plot, PLOT_HEIGHT))
         except Exception as exc:  # pragma: no cover
             return pn.pane.Alert(f"Quantity plot failed: {exc}", alert_type="danger")
 
     def _stats(self):
-        state = self.controls.state()
+        state = self.target_state()
         value_df, elapsed = self.data.value_df(state)
         stats = science.summary_stats(value_df.select(["timestamp", "group", "value"]))
         if stats.is_empty():
@@ -63,7 +114,7 @@ class QuantifyStep(BaseStep):
             stats = stats.select([c for c in ordered if c in stats.columns])
             return pn.widgets.Tabulator(
                 stats.to_pandas(),
-                height=min(320, max(120, 48 + stats.height * 34)),
+                height=min(170, max(90, 34 + stats.height * 24)),
                 layout="fit_data_fill",
                 show_index=False,
                 sizing_mode="stretch_width",
@@ -87,7 +138,7 @@ class QuantifyStep(BaseStep):
             stats = stats.select([c for c in ordered if c in stats.columns])
             return pn.widgets.Tabulator(
                 stats.to_pandas(),
-                height=min(440, max(120, 48 + stats.height * 34)),
+                height=min(210, max(100, 34 + stats.height * 24)),
                 layout="fit_data_fill",
                 show_index=False,
                 sizing_mode="stretch_width",
@@ -97,23 +148,20 @@ class QuantifyStep(BaseStep):
             return pn.pane.Alert(f"Advanced stats failed: {exc}", alert_type="danger")
 
     def stats_view(self):
+        # Kept for compatibility with older page code. The current layout renders
+        # summary and advanced statistics as separate compact panels so the
+        # reading order is: per-channel readout -> statistics -> advanced stats.
         return pn.Column(
             pn.bind(lambda *_: self.summary_stats_table(), *self.controls.explore_inputs),
-            pn.Card(
-                pn.bind(lambda *_: self.full_stats_table(), *self.controls.explore_inputs),
-                title="Advanced statistics",
-                collapsible=True,
-                collapsed=True,
-                margin=0,
-                sizing_mode="stretch_width",
-            ),
+            pn.bind(lambda *_: self.full_stats_table(), *self.controls.explore_inputs),
             margin=0,
             sizing_mode="stretch_width",
+            css_classes=["stacked-stats"],
         )
 
     def region_readout(self):
         try:
-            state = self.controls.state()
+            state = self.target_state()
             summary = self.data.region_summary(state)
             if summary.is_empty():
                 return pn.pane.Markdown("No data in the current range.")
@@ -123,19 +171,25 @@ class QuantifyStep(BaseStep):
 
     def df_plot(self):
         try:
-            state = self.controls.state()
+            state = self.target_state()
             norm_df, d_df = self.data.qcmd_frames(state)
-            return self.nearest_hover(plots.df_fingerprint(norm_df, d_df, state.groups, state.orders))
+            return self.nearest_hover(self.force_plot_height(plots.df_fingerprint(norm_df, d_df, state.groups, state.orders), COMPACT_PLOT_HEIGHT))
         except Exception as exc:  # pragma: no cover
             return pn.pane.Alert(f"Fingerprint plot failed: {exc}", alert_type="danger")
 
-    def controls_for_quantity(self, quantity_key: str):
+    def controls_for_quantity(self):
+        target_summary = pn.bind(
+            lambda *_: self.selected_target_summary_table(),
+            *self.controls.explore_inputs,
+            self.controls.analysis_region_select,
+            self.controls.annotation_version,
+        )
         return pn.Column(
-            self.controls.quantity_select,
-            self.controls.analyze_range_controls(quantity_key=quantity_key, include_save=False),
+            self.controls.plot_tools_row(include_quantity=True),
+            self.controls.analysis_region_controls(summary=target_summary),
             margin=0,
             sizing_mode="stretch_width",
-            css_classes=["compact-section"],
+            css_classes=["quantify-control-stack", "quantify-controls-summary", "compact-panel"],
         )
 
     def _reference_hint(self):
@@ -150,21 +204,40 @@ class QuantifyStep(BaseStep):
         return pn.Spacer(height=0)
 
     def view(self):
-        return pn.Column(
-            pn.bind(lambda *_: self._reference_hint(), *self.controls.explore_inputs),
-            self.panel(
-                self.quantity_plot,
-                *self.controls.explore_inputs,
-                self.controls.plot_reset_version,
-                title="Selected quantity",
-                controls=pn.bind(self.controls_for_quantity, self.controls.quantity_select),
-                controls_position="top",
+        hint_block = pn.bind(lambda *_: self._reference_hint(), *self.controls.explore_inputs)
+
+        main_timeline = self.panel(
+            self.quantity_plot,
+            *self.controls.explore_inputs,
+            self.controls.analysis_region_select,
+            self.controls.annotation_version,
+            self.controls.plot_reset_version,
+            title="Selected quantity",
+            controls=self.controls_for_quantity(),
+            controls_position="bottom",
+            collapsible=False,
+        )
+
+        lower = pn.Row(
+            self.panel(self.df_plot, *self.controls.explore_inputs, self.controls.plot_reset_version, title="ΔD vs Δf/n", collapsible=False),
+            pn.Column(
+                self.panel(self.region_readout, *self.controls.explore_inputs, title="Per-channel readout", collapsible=False),
+                self.panel(self.summary_stats_table, *self.controls.explore_inputs, title="Statistics", collapsible=False),
+                self.panel(self.full_stats_table, *self.controls.explore_inputs, title="Advanced statistics", collapsible=False),
+                margin=0,
+                sizing_mode="stretch_width",
+                css_classes=["readout-stats-stack"],
             ),
-            self.panel(self.current_range_summary_cards, *self.controls.explore_inputs, title="QCM-D summary"),
-            self.panel(self.region_readout, *self.controls.explore_inputs, title="Per-channel readout"),
-            self.panel(self.stats_view, *self.controls.explore_inputs, title="Statistics"),
-            self.panel(self.df_plot, *self.controls.explore_inputs, self.controls.plot_reset_version, title="ΔD vs Δf/n"),
             margin=0,
             sizing_mode="stretch_width",
-            css_classes=["workbench-page", "viewer-page"],
+            css_classes=["compact-two-column", "quantify-lower-row"],
+        )
+
+        return pn.Column(
+            hint_block,
+            main_timeline,
+            lower,
+            margin=0,
+            sizing_mode="stretch_width",
+            css_classes=["workbench-page", "viewer-page", "quantify-page"],
         )

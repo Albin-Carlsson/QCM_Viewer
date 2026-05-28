@@ -22,6 +22,7 @@ class ViewerActions:
         self._wire_buttons()
         self._build_exports()
         self.refresh_marker_options()
+        self.controls.analysis_region_select.param.watch(self.apply_analysis_region, "value")
 
     def _wire_buttons(self) -> None:
         self.controls.mark_window_button.on_click(self.add_window_marker)
@@ -126,6 +127,19 @@ class ViewerActions:
             opts[f"{ann.label} · {kind} · {start_s:.1f}–{end_s:.1f} s"] = ann.id
         self.controls.marker_select.options = opts
         self.controls.marker_select.value = current if current in opts.values() else "__current__"
+        if hasattr(self.controls, "analysis_region_select"):
+            analysis_current = self.controls.analysis_region_select.value
+            self.controls.analysis_region_select.options = opts
+            self.controls.analysis_region_select.value = analysis_current if analysis_current in opts.values() else "__current__"
+
+    def apply_analysis_region(self, event=None) -> None:
+        """Refresh dependent views when Quantify target changes.
+
+        Deliberately do not copy saved markers into the Current range slider.
+        Quantify derives its view state from the selected target directly, so
+        switching back to Current range shows the real live current range again.
+        """
+        self.controls.annotation_version.value += 1
 
     def delete_annotation_by_row(self, row: int) -> None:
         try:

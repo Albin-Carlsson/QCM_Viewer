@@ -297,6 +297,7 @@ class ViewerControls:
             options=_QUANTITY_OPTIONS,
             value=self.saved.get("quantity", "sauerbrey_mass"),
             sizing_mode="stretch_width",
+            css_classes=["compact-select", "quantity-select"],
         )
 
         self.sequence = pn.widgets.IntSlider(
@@ -388,6 +389,13 @@ class ViewerControls:
             value="__current__",
             sizing_mode="stretch_width",
         )
+        self.analysis_region_select = pn.widgets.Select(
+            name="Analysis target",
+            options={"Current range": "__current__"},
+            value="__current__",
+            sizing_mode="stretch_width",
+            css_classes=["compact-select", "analysis-target-select"],
+        )
 
         self.use_selection_as_baseline = pn.widgets.Button(
             name="Set reference = current range",
@@ -431,6 +439,7 @@ class ViewerControls:
             self.baseline_start,
             self.baseline_end,
             self.annotation_version,
+            self.analysis_region_select,
         )
 
     @property
@@ -775,7 +784,7 @@ class ViewerControls:
         return pn.Card(
             *children,
             title="Analysis range",
-            collapsible=True,
+            collapsible=False,
             collapsed=False,
             margin=0,
             sizing_mode="stretch_width",
@@ -784,6 +793,28 @@ class ViewerControls:
 
     def current_range_compact(self):
         return self.current_range_controls(include_save=False)
+
+    def analysis_region_controls(self, summary=None):
+        """Compact Quantify target selector.
+
+        The selector no longer mutates the saved current range. Quantify reads
+        the selected target directly, so choosing a marker zooms that page to
+        the marker while choosing Current range returns to the live range.
+        """
+        target_stack = pn.Column(
+            self.analysis_region_select,
+            summary if summary is not None else pn.Spacer(height=0),
+            margin=0,
+            sizing_mode="stretch_width",
+            css_classes=["analysis-target-stack", "compact-panel"],
+        )
+        return pn.Row(
+            target_stack,
+            self.current_range_controls(include_save=False),
+            margin=0,
+            sizing_mode="stretch_width",
+            css_classes=["analysis-region-row", "compact-two-column", "analysis-target-row"],
+        )
 
     def zero_reference_controls(self):
         return pn.Card(
@@ -799,7 +830,7 @@ class ViewerControls:
                 css_classes=["range-actions"],
             ),
             title="Reference range",
-            collapsible=True,
+            collapsible=False,
             collapsed=False,
             margin=0,
             sizing_mode="stretch_width",
@@ -828,7 +859,7 @@ class ViewerControls:
             ),
             self.phase_mark_controls(include_card=False),
             title="Mark range",
-            collapsible=True,
+            collapsible=False,
             collapsed=False,
             margin=0,
             sizing_mode="stretch_width",
@@ -925,11 +956,36 @@ class ViewerControls:
             include_save=include_save,
         )
 
-    def overview_range_controls(self):
-        return self.paired_range_controls("overview-ranges", include_save=False)
+    def overview_range_controls(self, include_reset: bool = True):
+        # Review is only for selecting the current analysis range. Reference and
+        # phase marking happen on their own pages, so no range-target switch is
+        # shown here.
+        self.brush_mode.value = "current"
+        children = [self.current_range_controls(include_save=False)]
+        if include_reset:
+            children.insert(0, self.plot_tools_row(include_quantity=False))
+        children.append(self.range_status)
+        return pn.Column(
+            *children,
+            margin=0,
+            sizing_mode="stretch_width",
+            css_classes=["plot-controls", "overview-ranges"],
+        )
 
-    def analyze_range_controls(self, quantity_key: str | None = None, include_save: bool = True):
-        return self.paired_range_controls("analyze-ranges", quantity_key=quantity_key, include_save=include_save)
+    def analyze_range_controls(self, quantity_key: str | None = None, include_save: bool = True, include_reset: bool = True):
+        # Quantify is also current-range only; reference and marking are handled
+        # by the dedicated Reference and Phases steps.
+        self.brush_mode.value = "current"
+        children = [self.current_range_controls(include_save=include_save)]
+        if include_reset:
+            children.insert(0, self.plot_tools_row(include_quantity=True))
+        children.append(self.range_status)
+        return pn.Column(
+            *children,
+            margin=0,
+            sizing_mode="stretch_width",
+            css_classes=["plot-controls", "analyze-ranges"],
+        )
 
     def zero_reference_if_needed(self, quantity_key: str | None = None):
         key = quantity_key or self.quantity_select.value
@@ -946,6 +1002,28 @@ class ViewerControls:
         if include_zero_reference:
             items.append(self.zero_reference_controls())
         return pn.Column(*items, margin=0, sizing_mode="stretch_width", css_classes=["plot-controls"])
+
+
+    def compact_channel_controls(self):
+        """Compact, collapsed channel chooser for placement next to plot reset."""
+        card = self.channel_controls()
+        card.collapsed = True
+        card.width = 280
+        card.sizing_mode = "fixed"
+        return card
+
+    def plot_tools_row(self, *, include_quantity: bool = False):
+        """Small per-plot toolbar: reset scale, optional quantity selector, channels."""
+        items = [self.plot_reset_button()]
+        if include_quantity:
+            items.append(self.quantity_select)
+        items.append(self.compact_channel_controls())
+        return pn.Row(
+            *items,
+            margin=0,
+            sizing_mode="stretch_width",
+            css_classes=["plot-tools-row"],
+        )
 
     def channel_controls(self):
         return pn.Card(

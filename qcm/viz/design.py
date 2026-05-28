@@ -488,3 +488,385 @@ def meta_pill(label: str, value: str) -> str:
         f"line-height:1.1;font-variant-numeric:tabular-nums;white-space:nowrap'>{escape(value)}</div>"
         "</div>"
     )
+
+
+# Compact scientific-workbench overrides -------------------------------------
+APP_CSS += """
+:root {
+  --qcm-bg: #eef2f7;
+  --qcm-surface: #ffffff;
+  --qcm-surface-muted: #f3f6fa;
+  --qcm-border: #c9d4e2;
+  --qcm-border-strong: #aebcd0;
+  --qcm-text: #0f172a;
+  --qcm-text-soft: #1f2937;
+  --qcm-muted: #475569;
+  --qcm-shadow-1: none;
+  --qcm-shadow-2: none;
+}
+.main { padding: 8px 10px 14px 10px !important; }
+.qcm-shell,
+.viewer-page,
+.workbench-page,
+.compact-section,
+.plot-controls { gap: 8px !important; }
+.qcm-context-bar {
+  border: 1px solid var(--qcm-border-strong) !important;
+  background: var(--qcm-surface) !important;
+  border-radius: 12px !important;
+  padding: 8px !important;
+  margin-bottom: 6px !important;
+}
+.global-toolbar { align-items: end !important; gap: 8px !important; }
+.qcm-step-nav {
+  border: 1px solid var(--qcm-border-strong) !important;
+  background: var(--qcm-surface-muted) !important;
+  border-radius: 12px !important;
+  padding: 6px !important;
+  gap: 6px !important;
+}
+.qcm-step-nav .bk-btn { min-height: 30px !important; font-weight: 700 !important; }
+.qcm-section-title,
+.section-title,
+.workbench-section h2 { margin: 0 !important; font-size: 1.05rem !important; line-height: 1.2 !important; }
+.bk-card,
+.viewer-card {
+  border: 1px solid var(--qcm-border-strong) !important;
+  border-radius: 12px !important;
+  box-shadow: none !important;
+  background: var(--qcm-surface) !important;
+  margin: 0 !important;
+}
+.bk-card-header {
+  min-height: 30px !important;
+  padding: 6px 10px !important;
+  background: var(--qcm-surface-muted) !important;
+  border-bottom: 1px solid var(--qcm-border) !important;
+  font-size: .92rem !important;
+  font-weight: 750 !important;
+}
+.bk-card-body { padding: 8px 10px !important; }
+.range-editor-card .bk-card-body { padding: 8px !important; }
+.range-number-row { gap: 6px !important; }
+.range-actions { gap: 6px !important; }
+.summary-table .tabulator { font-size: 12px !important; }
+.quantify-split { gap: 8px !important; align-items: flex-start !important; }
+.quantify-side-panel { gap: 8px !important; }
+.phase-empty-state { padding: 8px 10px !important; }
+.markdown p { line-height: 1.32 !important; margin-bottom: 6px !important; }
+"""
+
+APP_CSS += """
+/* ---- Compact page-specific layout fixes ---------------------------------- */
+.qcm-context-bar.top-tools-only {
+  padding: 4px 6px !important;
+  min-height: 0 !important;
+  border-color: transparent !important;
+  background: transparent !important;
+  margin-bottom: 0 !important;
+}
+.plot-tools-row {
+  align-items: flex-end !important;
+  gap: 8px !important;
+  flex-wrap: wrap !important;
+}
+.plot-tools-row > .bk-btn,
+.plot-tools-row .bk-btn {
+  min-width: 150px !important;
+}
+.plot-tools-row .bk-input-group {
+  max-width: 320px !important;
+  min-width: 220px !important;
+  margin-bottom: 0 !important;
+}
+.plot-tools-row .channel-controls {
+  max-width: 340px !important;
+}
+.channel-controls .bk-card-header {
+  cursor: pointer !important;
+}
+.compact-two-column {
+  display: flex !important;
+  gap: 8px !important;
+  align-items: flex-start !important;
+}
+.compact-two-column > *:first-child {
+  min-width: 0 !important;
+  flex: 1 1 auto !important;
+}
+.compact-three-column {
+  display: grid !important;
+  grid-template-columns: minmax(360px, 1.2fr) minmax(360px, 1fr) minmax(360px, 1fr) !important;
+  gap: 8px !important;
+  align-items: start !important;
+}
+.review-controls-summary,
+.quantify-controls-summary,
+.phase-controls-saved {
+  margin-top: 6px !important;
+}
+.review-summary-stack,
+.quantify-summary-stack,
+.phase-table-stack {
+  max-width: 430px !important;
+}
+.review-page .plot-first-card .bk-card-body,
+.phases-page .plot-first-card .bk-card-body,
+.quantify-page .plot-first-card .bk-card-body {
+  padding: 6px 8px !important;
+}
+.current-range-card .bk-card-body,
+.reference-range-card .bk-card-body,
+.mark-range-card .bk-card-body {
+  display: grid !important;
+  gap: 6px !important;
+}
+.range-number-row .bk-input-group {
+  margin-bottom: 0 !important;
+}
+.range-number-row .bk-input-group label,
+.plot-tools-row .bk-input-group label {
+  font-size: 11px !important;
+  margin-bottom: 2px !important;
+}
+.phase-analysis-row > * {
+  flex: 1 1 0 !important;
+  min-width: 0 !important;
+}
+.quantify-lower-row > * {
+  min-width: 0 !important;
+}
+.summary-table .tabulator-row .tabulator-cell,
+.tabulator-row .tabulator-cell {
+  padding-top: 5px !important;
+  padding-bottom: 5px !important;
+}
+.summary-table .tabulator {
+  font-size: 11.5px !important;
+}
+.bk-card-header {
+  min-height: 26px !important;
+  padding-top: 4px !important;
+  padding-bottom: 4px !important;
+}
+.bk-card-body {
+  padding: 6px 8px !important;
+}
+@media (max-width: 1200px) {
+  .compact-two-column,
+  .compact-three-column {
+    display: flex !important;
+    flex-direction: column !important;
+  }
+  .review-summary-stack,
+  .quantify-summary-stack,
+  .phase-table-stack {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+}
+
+"""
+
+APP_CSS += """
+/* Single-screen compaction pass ------------------------------------------ */
+.qcm-shell, .viewer-page, .workbench-page { gap: 6px !important; }
+.qcm-step-nav { gap: 6px !important; margin-bottom: 4px !important; }
+.qcm-step-nav .bk-btn { padding: 5px 8px !important; min-height: 30px !important; }
+.qcm-context-bar { min-height: 0 !important; padding: 0 !important; margin: 0 !important; }
+.qcm-footer { display: none !important; }
+.viewer-card, .bk-card { margin: 0 !important; }
+.bk-card-header { min-height: 28px !important; padding: 5px 9px !important; }
+.bk-card-body { padding: 7px 9px !important; }
+.plot-controls, .compact-section, .quantify-control-stack, .readout-stats-stack, .stacked-stats { gap: 6px !important; }
+.range-editor-card .bk-card-body { padding: 6px 8px !important; }
+.range-number-row { gap: 6px !important; }
+.range-actions { gap: 6px !important; }
+.analysis-region-row { align-items: stretch !important; gap: 8px !important; }
+.analysis-region-row > *:first-child { flex: 0 0 230px !important; max-width: 230px !important; }
+.analysis-region-row .current-range-card { flex: 1 1 auto !important; }
+.quantify-controls-summary { gap: 8px !important; align-items: stretch !important; }
+.quantify-summary-stack { max-width: 360px !important; }
+.summary-table .tabulator-row .tabulator-cell,
+.bk-DataTabulator .tabulator-row .tabulator-cell { padding: 3px 6px !important; }
+.quantify-lower-row { gap: 8px !important; align-items: stretch !important; }
+.quantify-lower-row > * { min-width: 0 !important; }
+.readout-stats-stack { flex: 1.1 1 0 !important; }
+.compact-two-column > * { min-width: 0 !important; }
+
+"""
+
+
+APP_CSS += """
+/* Iteration: one-screen compact layout + consistent control style ---------- */
+:root {
+  --qcm-bg: #eef2f7;
+  --qcm-surface-muted: #f8fafc;
+  --qcm-border: #c7d2e1;
+  --qcm-border-strong: #94a3b8;
+  --qcm-muted: #475569;
+}
+.main { padding: 8px 12px 12px 12px !important; }
+.qcm-shell { gap: 4px !important; }
+.qcm-context-bar { display: none !important; }
+.qcm-step-nav { margin-bottom: 2px !important; }
+.qcm-step-nav .bk-btn,
+.plot-tools-row .bk-btn,
+.range-actions .bk-btn {
+  min-height: 28px !important;
+  height: 28px !important;
+  padding: 3px 8px !important;
+  border-radius: 8px !important;
+  border: 1px solid var(--qcm-border-strong) !important;
+  box-shadow: none !important;
+}
+.bk-card,
+.viewer-card,
+.channel-controls,
+.range-editor-card {
+  border-radius: 10px !important;
+  border-color: var(--qcm-border) !important;
+  box-shadow: none !important;
+}
+.bk-card-header {
+  min-height: 24px !important;
+  padding: 4px 8px !important;
+  font-size: 12px !important;
+  letter-spacing: 0 !important;
+}
+.bk-card-body { padding: 5px 7px !important; }
+.plot-tools-row {
+  gap: 6px !important;
+  align-items: flex-start !important;
+  margin-bottom: 2px !important;
+}
+.plot-tools-row > * { min-width: 0 !important; }
+.plot-tools-row .bk-input-group { margin-bottom: 0 !important; }
+.plot-tools-row .bk-select { min-height: 28px !important; }
+.channel-controls { max-width: 280px !important; }
+.channel-controls .bk-card-body { max-height: 190px !important; overflow: auto !important; }
+.analysis-target-row { gap: 6px !important; align-items: stretch !important; }
+.analysis-target-row > *:first-child { flex: 0 0 190px !important; max-width: 190px !important; }
+.analysis-target-row .current-range-card { flex: 1 1 auto !important; }
+.quantify-controls-summary,
+.review-controls-summary,
+.phase-controls-saved { gap: 6px !important; }
+.review-summary-stack,
+.quantify-summary-stack,
+.phase-table-stack { max-width: 320px !important; width: 320px !important; }
+.current-range-card .bk-card-body,
+.reference-range-card .bk-card-body,
+.mark-range-card .bk-card-body { gap: 4px !important; }
+.range-number-row .bk-input-group label,
+.plot-tools-row .bk-input-group label,
+.analysis-target-row .bk-input-group label {
+  font-size: 10.5px !important;
+  margin-bottom: 1px !important;
+}
+.range-number-row .bk-input,
+.analysis-target-row .bk-input,
+.plot-tools-row .bk-input { min-height: 26px !important; height: 26px !important; }
+.range-actions { gap: 4px !important; }
+.quantify-lower-row { gap: 6px !important; }
+.quantify-lower-row > :first-child { flex: 0.95 1 0 !important; }
+.readout-stats-stack { flex: 1.05 1 0 !important; gap: 5px !important; }
+.summary-table .tabulator { font-size: 11px !important; }
+.summary-table .tabulator-row .tabulator-cell,
+.tabulator-row .tabulator-cell { padding: 2px 5px !important; }
+.phase-analysis-row,
+.compact-two-column { gap: 6px !important; }
+.viewer-page > .bk-panel-models-layout-Column { gap: 5px !important; }
+
+
+/* Compact one-screen workflow overrides ----------------------------------- */
+.qcm-shell, .viewer-page, .workbench-page {
+  gap: 6px !important;
+}
+.main {
+  padding: 8px 12px 12px 12px !important;
+}
+.viewer-card, .bk-card {
+  border-color: var(--qcm-border-strong) !important;
+  box-shadow: none !important;
+}
+.bk-card-header {
+  min-height: 26px !important;
+  padding: 5px 9px !important;
+  font-size: 0.82rem !important;
+}
+.bk-card-body {
+  padding: 7px 8px !important;
+}
+.plot-tools-row {
+  align-items: end !important;
+  gap: 8px !important;
+}
+.plot-tools-row .bk-btn {
+  min-height: 32px !important;
+}
+.compact-select .bk-input-group,
+.quantity-select .bk-input-group,
+.analysis-target-select .bk-input-group {
+  margin-bottom: 0 !important;
+}
+.quantity-select, .analysis-target-select {
+  min-width: 260px !important;
+}
+.quantity-select select, .analysis-target-select select {
+  background: var(--qcm-surface-muted) !important;
+  border: 1px solid var(--qcm-border-strong) !important;
+  border-radius: 10px !important;
+  min-height: 32px !important;
+  font-weight: 650 !important;
+}
+.range-editor-card .bk-card-body {
+  padding: 6px 8px !important;
+}
+.range-number-row {
+  gap: 6px !important;
+}
+.compact-two-column {
+  gap: 8px !important;
+  align-items: stretch !important;
+}
+.compact-panel {
+  gap: 6px !important;
+}
+.review-controls-summary, .reference-controls-row, .analysis-target-row {
+  align-items: start !important;
+}
+.phase-controls-saved {
+  max-width: 980px !important;
+}
+.phases-page .summary-table,
+.target-summary-table {
+  max-width: 100% !important;
+}
+.quantify-controls-summary .analysis-target-stack {
+  max-width: 430px !important;
+  min-width: 320px !important;
+}
+.quantify-lower-row > *:first-child {
+  max-width: 45% !important;
+}
+.tabulator {
+  font-size: 0.78rem !important;
+}
+.tabulator .tabulator-header .tabulator-col,
+.tabulator .tabulator-row .tabulator-cell {
+  padding: 3px 6px !important;
+}
+.qcm-step-nav {
+  gap: 6px !important;
+}
+.qcm-step-nav .bk-btn {
+  min-height: 30px !important;
+  padding: 4px 9px !important;
+}
+.qcm-context-bar {
+  display: none !important;
+}
+.qcm-footer {
+  display: none !important;
+}
+"""

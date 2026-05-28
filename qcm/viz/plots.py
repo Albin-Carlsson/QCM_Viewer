@@ -20,6 +20,9 @@ from .theme import (
     HERO_HEIGHT,
     MAX_PLOT_POINTS,
     PLOT_HEIGHT,
+    COMPACT_PLOT_HEIGHT,
+    SWEEP_PANEL_HEIGHT,
+    WATERFALL_PANEL_HEIGHT,
     Quantity,
     color_for_slot,
 )
@@ -339,6 +342,7 @@ def dual_axis_qcmd(
     annotation_spans: list | None = None,
     window: tuple[float, float] | None = None,
     select_x: bool = False,
+    height: int = HERO_HEIGHT,
 ):
     """Canonical QCM-D plot: Δf/n (left, solid) and ΔD (right, dashed)."""
     labels = series_labels(groups, orders)
@@ -379,7 +383,7 @@ def dual_axis_qcmd(
         hooks.append(_xbox_select_hook)
     return hv.Overlay(elements).opts(
         hv.opts.Overlay(
-            title=title, height=HERO_HEIGHT, responsive=True, legend_position="right",
+            title=title, height=height, responsive=True, legend_position="right",
             active_tools=active, tools=tools,
             hooks=hooks,
             show_grid=True,
@@ -418,7 +422,7 @@ def df_fingerprint(norm_df: pl.DataFrame, d_df: pl.DataFrame, groups: list[int],
     return hv.Overlay(paths).opts(
         hv.opts.Overlay(
             title="Df plot — ΔD vs Δf/n (viscoelastic fingerprint)",
-            height=PLOT_HEIGHT, responsive=True, legend_position="right",
+            height=COMPACT_PLOT_HEIGHT, responsive=True, legend_position="right",
             active_tools=["wheel_zoom"], tools=["hover", "box_zoom", "reset"],
             hooks=[_legend_mute_hook], show_grid=True,
         ),
@@ -464,8 +468,6 @@ def waterfall(df: pl.DataFrame, orders: dict[int, int] | None = None) -> list:
         )
     return panels or [empty("No waterfall data")]
 
-
-SWEEP_PANEL_HEIGHT = 220
 
 
 def _sweep_center(sub: pl.DataFrame, f: "np.ndarray") -> float:

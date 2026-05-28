@@ -1,13 +1,10 @@
 """Stepper shell: context bar, step navigator, step canvas, footer, QC drawer."""
 from __future__ import annotations
 
-from html import escape
-
 import panel as pn
 
 from . import nav
 from .actions import ViewerActions
-from .components import pill, section_title
 from .controls import ViewerControls
 from .data import QCMViewData
 from .design import APP_CSS
@@ -63,28 +60,21 @@ class ViewerShell:
 
     # -- regions ----------------------------------------------------------
     def context_bar(self):
-        channels = ", ".join(f"n={n}" for _, n in sorted(self.info.orders.items())) or "—"
-        meta = "".join([
-            pill("Duration", f"{self.info.span_s:,.1f} s"),
-            pill("Channels", str(len(self.info.groups))),
-            pill("Overtones", channels),
-            pill("Sweeps", f"{self.info.n_sweeps:,}"),
-        ])
+        """Compact persistent toolbar.
+
+        The old run metadata block made the top of the app visually heavy and
+        repeated information that is not needed while analysing. Keep only the
+        controls that help orient the current workflow.
+        """
         inspect_btn = pn.widgets.Button(name="Inspect raw sweeps", button_type="default", icon="microscope")
         inspect_btn.on_click(self._open_drawer)
 
-        top = pn.Row(
-            pn.pane.HTML(f"<div class='qcm-run-id'>{escape(str(self.info.run_id))}</div>", margin=0),
-            pn.pane.HTML(f"<div style='display:flex;gap:8px;flex-wrap:wrap'>{meta}</div>", margin=0),
+        return pn.Row(
+            pn.layout.HSpacer(),
             inspect_btn,
-            margin=0, sizing_mode="stretch_width", css_classes=["qcm-context-row"],
-        )
-        readout = pn.bind(self.controls.zero_reference_summary, self.controls.t_range, self.controls.baseline_range)
-        channels_card = self.controls.channel_controls()
-        channels_card.collapsed = True
-        return pn.Column(
-            top, readout, channels_card,
-            margin=0, sizing_mode="stretch_width", css_classes=["qcm-context-bar"],
+            margin=0,
+            sizing_mode="stretch_width",
+            css_classes=["qcm-context-bar", "is-compact", "top-tools-only"],
         )
 
     def navigator(self):
@@ -106,7 +96,6 @@ class ViewerShell:
             idx = nav.clamp_step(int(active))
             step = nav.STEPS[idx]
             return pn.Column(
-                section_title(step.label, eyebrow=f"Step {idx + 1} of {len(nav.STEPS)}"),
                 self._steps[step.id].view(),
                 margin=0, sizing_mode="stretch_width",
             )

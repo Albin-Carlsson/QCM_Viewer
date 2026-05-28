@@ -9,7 +9,7 @@ import polars as pl
 
 from .. import science  # noqa: F401  (kept for parity; used by subclasses)
 from ..actions import ViewerActions
-from ..components import empty_state, metric_strip
+from ..components import empty_state
 from ..controls import ViewerControls
 from ..data import QCMViewData
 
@@ -30,7 +30,7 @@ class BaseStep:
         *dependencies,
         title: str,
         controls=None,
-        collapsible: bool = True,
+        collapsible: bool = False,
         collapsed: bool = False,
         controls_position: str = "top",
     ):
@@ -177,11 +177,39 @@ class BaseStep:
         except Exception:
             return None
 
-    def with_phase_labels(self, plot, df: pl.DataFrame | None = None):
+    @staticmethod
+    def _force_plot_height_hook(height: int):
+        """Force the final Bokeh figure height after HoloViews overlay composition.
+
+        HoloViews can lose height options when a plot is multiplied by labels or
+        other overlays. This hook is deliberately applied last so Review,
+        Reference, and Quantify render at the standardized sizes.
+        """
+        def hook(plot, _element):
+            try:
+                fig = plot.state
+                fig.height = int(height)
+                fig.min_height = int(height)
+                fig.sizing_mode = "stretch_width"
+            except Exception:
+                pass
+        return hook
+
+    def force_plot_height(self, plot, height: int):
+        try:
+            return plot.opts(
+                hv.opts.Overlay(height=height, responsive=True, hooks=[self._force_plot_height_hook(height)]),
+                hv.opts.Curve(height=height, responsive=True),
+            )
+        except Exception:
+            return plot
+
+    def with_phase_labels(self, plot, df: pl.DataFrame | None = None, height: int | None = None):
         try:
             y = self._phase_label_y(df) if df is not None else 0.0
             labels = self.phase_label_overlay(y)
-            return plot * labels if labels is not None else plot
+            out = plot * labels if labels is not None else plot
+            return self.force_plot_height(out, height) if height is not None else out
         except Exception:
             return plot
 
@@ -218,7 +246,7 @@ class BaseStep:
             if df[c].dtype in (pl.Float32, pl.Float64):
                 df = df.with_columns(pl.col(c).round(4))
         df = df.rename({k: v for k, v in self._SUMMARY_RENAME.items() if k in df.columns})
-        h = height or min(330, max(120, 48 + df.height * 34))
+        h = height or min(220, max(96, 34 + df.height * 26))
         return pn.widgets.Tabulator(
             df.to_pandas(),
             height=h,
@@ -259,6 +287,15 @@ class BaseStep:
                 ("Mean Q", self._fmt(means.get("Q"), 0), ""),
                 ("ΔD/Δf", self._fmt(means.get("dD_per_df"), 4), ""),
             ]
-            return metric_strip(rows)
+            table = pl.DataFrame(rows, schema=["Metric", "Value", "Range"], orient="row")
+            return pn.widgets.Tabulator(
+                table.to_pandas(),
+                height=182,
+                layout="fit_data_fill",
+                show_index=False,
+                sizing_mode="stretch_width",
+                disabled=True,
+                css_classes=["summary-table"],
+            )
         except Exception as exc:  # pragma: no cover
-            return pn.pane.Alert(f"Summary cards failed: {exc}", alert_type="danger")
+            return pn.pane.Alert(f"Summary table failed: {exc}", alert_type="danger")
