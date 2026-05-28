@@ -22,7 +22,9 @@ from qcm.run import open_run
 from .actions import ViewerActions
 from .controls import ViewerControls
 from .data import QCMViewData
-from .layout import ViewerLayout
+from .design import APP_CSS
+from .plot_theme import apply as apply_plot_theme
+from .shell import ViewerShell
 from .state import RunInfo
 
 _US = 1_000_000
@@ -30,6 +32,8 @@ _US = 1_000_000
 pn.extension("tabulator", sizing_mode="stretch_width", notifications=True)
 pn.config.loading_indicator = True
 hv.extension("bokeh")
+apply_plot_theme()
+pn.config.raw_css.append(APP_CSS)
 
 
 class QCMViewer:
@@ -41,7 +45,7 @@ class QCMViewer:
         self.controls = ViewerControls(self.info, self.run.load_view_state())
         self.data = QCMViewData(self.run, self.info)
         self.actions = ViewerActions(self.run, self.info, self.controls, self.data)
-        self.layout = ViewerLayout(self.run, self.info, self.controls, self.data, self.actions)
+        self.shell = ViewerShell(self.run, self.info, self.controls, self.data, self.actions)
 
     def _read_run_info(self) -> RunInfo:
         groups = self.run.groups or [0]
@@ -75,7 +79,7 @@ class QCMViewer:
         )
 
     def view(self):
-        return self.layout.view()
+        return self.shell.view()
 
 
 def app(run_path: str | None = None):
