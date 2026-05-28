@@ -14,6 +14,7 @@ import numpy as np
 import polars as pl
 
 from .theme import (
+    ACCENT,
     BASELINE_COLOR,
     EVENT_COLOR,
     HERO_HEIGHT,
@@ -147,6 +148,29 @@ def _vline_hover_hook(plot, _element):
         pass
 
 
+def _xbox_select_hook(plot, _element):
+    """Add an x-only box-select tool and make it the active drag gesture.
+
+    Selection tools attach to glyphs, so a ``box_select`` string on an Overlay's
+    options is dropped. Adding the tool here guarantees it exists; constraining it
+    to ``dimensions='width'`` turns a horizontal drag into a time-range selection,
+    which the BoundsX stream reads to set the analysis window. The scroll wheel
+    stays the active zoom, so drag = select, scroll = zoom.
+    """
+    try:
+        from bokeh.models import BoxSelectTool
+
+        fig = plot.state
+        existing = fig.select(BoxSelectTool)
+        tool = existing[0] if existing else BoxSelectTool()
+        if not existing:
+            fig.add_tools(tool)
+        tool.dimensions = "width"
+        fig.toolbar.active_drag = tool
+    except Exception:
+        pass
+
+
 def annotation_elements(spans) -> list:
     """Return saved-region overlays.
 
@@ -213,6 +237,36 @@ def baseline_span(x0: float, x1: float) -> hv.VSpan:
     return hv.VSpan(x0, x1).opts(color=BASELINE_COLOR, alpha=0.10)
 
 
+def window_elements(window: tuple[float, float] | None) -> list:
+    """Shade the active analysis window (the 'current range') on a full-run plot.
+
+    Drawn in the accent color with dashed edges so it reads as the selected
+    interval, distinct from the green zero/reference span and orange saved
+    regions. Returned as a list so callers can splice it in before the curves.
+    """
+    if window is None:
+        return []
+    x0, x1 = float(window[0]), float(window[1])
+    if x1 <= x0:
+        return []
+    return [
+        hv.VSpan(x0, x1).opts(color=ACCENT, alpha=0.14),
+        hv.VLine(x0).opts(color=ACCENT, line_dash="solid", line_width=1.4),
+        hv.VLine(x1).opts(color=ACCENT, line_dash="solid", line_width=1.4),
+    ]
+
+
+def _time_tools(select_x: bool) -> tuple[list[str], list[str]]:
+    """Tool list + active tools for a time-domain overlay.
+
+    The x-only box-select used for range brushing is added by
+    ``_xbox_select_hook`` (selection tools must attach to glyphs, so a string in
+    the Overlay options is dropped). Here we only keep the scroll wheel as the
+    active zoom; ``select_x`` is accepted for symmetry with the plot builders.
+    """
+    return ["hover", "box_zoom", "reset"], ["wheel_zoom"]
+
+
 # ----------------------------------------------------------------------- plots
 def timeline(
     value_df: pl.DataFrame,
@@ -223,10 +277,12 @@ def timeline(
     height: int = PLOT_HEIGHT,
     annotation_spans: list | None = None,
     baseline: tuple[float, float] | None = None,
+    window: tuple[float, float] | None = None,
+    select_x: bool = False,
 ):
     """Single flat overlay: per-group curves + optional baseline span + annotations."""
     labels = series_labels(groups, orders)
-    elements = []
+    elements = list(window_elements(window))
     if baseline is not None:
         elements.append(baseline_span(*baseline))
     for slot, g in enumerate(groups):
@@ -241,11 +297,15 @@ def timeline(
     elements.extend(annotation_elements(annotation_spans or []))
     if not any(isinstance(e, hv.Curve) for e in elements):
         return empty(f"No {q.label} data")
+    tools, active = _time_tools(select_x)
+    hooks = [_vline_hover_hook, _legend_mute_hook, _saved_region_label_hook(annotation_spans or [])]
+    if select_x:
+        hooks.append(_xbox_select_hook)
     return hv.Overlay(elements).opts(
         hv.opts.Overlay(
             title=title, height=height, responsive=True, legend_position="right",
-            active_tools=["wheel_zoom"], tools=["hover", "box_zoom", "reset"],
-            hooks=[_vline_hover_hook, _legend_mute_hook, _saved_region_label_hook(annotation_spans or [])], show_grid=True,
+            active_tools=active, tools=tools,
+            hooks=hooks, show_grid=True,
         ),
         hv.opts.Curve(tools=["hover"]),
     )
@@ -277,6 +337,8 @@ def dual_axis_qcmd(
     title: str,
     baseline: tuple[float, float] | None = None,
     annotation_spans: list | None = None,
+    window: tuple[float, float] | None = None,
+    select_x: bool = False,
 ):
     """Canonical QCM-D plot: Δf/n (left, solid) and ΔD (right, dashed)."""
     labels = series_labels(groups, orders)
@@ -304,12 +366,22 @@ def dual_axis_qcmd(
     d_lo = float(d_vals.min()) if d_vals.len() else 0.0
     d_hi = float(d_vals.max()) if d_vals.len() else 1.0
 
-    elements = ([baseline_span(*baseline)] if baseline is not None else []) + annotation_elements(annotation_spans or []) + left + right
+    elements = (
+        list(window_elements(window))
+        + ([baseline_span(*baseline)] if baseline is not None else [])
+        + annotation_elements(annotation_spans or [])
+        + left
+        + right
+    )
+    tools, active = _time_tools(select_x)
+    hooks = [_twin_axis_hook(d_lo, d_hi, "ΔD  [×10⁻⁶]"), _vline_hover_hook, _legend_mute_hook, _saved_region_label_hook(annotation_spans or [])]
+    if select_x:
+        hooks.append(_xbox_select_hook)
     return hv.Overlay(elements).opts(
         hv.opts.Overlay(
             title=title, height=HERO_HEIGHT, responsive=True, legend_position="right",
-            active_tools=["wheel_zoom"], tools=["hover", "box_zoom", "reset"],
-            hooks=[_twin_axis_hook(d_lo, d_hi, "ΔD  [×10⁻⁶]"), _vline_hover_hook, _legend_mute_hook, _saved_region_label_hook(annotation_spans or [])],
+            active_tools=active, tools=tools,
+            hooks=hooks,
             show_grid=True,
         ),
         hv.opts.Curve(tools=["hover"]),

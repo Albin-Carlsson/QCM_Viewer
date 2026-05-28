@@ -162,3 +162,39 @@ def summary_stats(value_df: pl.DataFrame) -> pl.DataFrame:
         )
         .sort("group")
     )
+
+
+def region_overtone_summary(
+    frames: dict[str, pl.DataFrame],
+    orders: dict[int, int],
+) -> pl.DataFrame:
+    """Compact per-channel summary of several quantities over one region.
+
+    ``frames`` maps a short column name (e.g. ``"df_n"``, ``"dD"``, ``"mass"``,
+    ``"Q"``) to a computed ``[group, value]`` frame. Returns one row per group
+    with the mean of each quantity, the overtone order ``n``, and — when both
+    ``df_n`` and ``dD`` are present — the viscoelastic ratio ``ΔD / (-Δf/n)``
+    (a higher ratio indicates a softer, more dissipative film for which the
+    rigid Sauerbrey assumption is weaker). All frames share the same group set,
+    so a left join from the first non-empty frame is sufficient.
+    """
+    out: pl.DataFrame | None = None
+    for name, df in frames.items():
+        if df is None or df.is_empty():
+            continue
+        agg = df.group_by("group").agg(pl.col("value").mean().alias(name))
+        out = agg if out is None else out.join(agg, on="group", how="left")
+    if out is None or out.is_empty():
+        return pl.DataFrame()
+
+    out = out.with_columns(
+        pl.col("group").replace_strict(orders, default=1, return_dtype=pl.Int64).alias("n")
+    )
+    if "df_n" in out.columns and "dD" in out.columns:
+        out = out.with_columns(
+            pl.when(pl.col("df_n").abs() > 1e-12)
+            .then(pl.col("dD") / (-pl.col("df_n")))
+            .otherwise(None)
+            .alias("dD_per_df")
+        )
+    return out.sort("group")

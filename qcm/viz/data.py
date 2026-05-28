@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import time
 from collections import OrderedDict
+from dataclasses import replace
 from typing import Any, Callable
 
 import polars as pl
@@ -78,6 +79,49 @@ class QCMViewData:
         norm_df, _ = self.value_df(state, "delta_f_norm")
         d_df, _ = self.value_df(state, "delta_D")
         return norm_df, d_df
+
+    _SUMMARY_QUANTITIES = (
+        ("delta_f_norm", "df_n"),
+        ("delta_D", "dD"),
+        ("sauerbrey_mass", "mass"),
+        ("quality_factor", "Q"),
+    )
+
+    def region_summary(self, state: ViewState) -> pl.DataFrame:
+        """Per-channel mean of the headline QCM-D quantities over the current range.
+
+        Reuses the cached ``value_df`` queries (the hero plot already warms
+        Δf/n and ΔD), so this glanceable readout is cheap.
+        """
+        frames = {name: self.value_df(state, key)[0] for key, name in self._SUMMARY_QUANTITIES}
+        return science.region_overtone_summary(frames, state.orders)
+
+    def regions_comparison(self, state: ViewState) -> pl.DataFrame:
+        """Stack :meth:`region_summary` for every saved range region.
+
+        The current quantity selection is irrelevant here; each saved range is
+        summarized on the same fixed set of headline quantities, referenced to
+        the active zero/reference range, so regions can be compared side by side.
+        """
+        rows: list[pl.DataFrame] = []
+        for ann in self.annotations():
+            if ann.type != "range" or ann.t1 is None:
+                continue
+            start_s = (ann.t0 - self.info.t0_us) / _US
+            end_s = (ann.t1 - self.info.t0_us) / _US
+            region_state = replace(state, t_range_s=(start_s, end_s))
+            summary = self.region_summary(region_state)
+            if summary.is_empty():
+                continue
+            rows.append(
+                summary.with_columns(
+                    pl.lit(ann.label).alias("region"),
+                    pl.lit(round(max(0.0, end_s - start_s), 2)).alias("duration_s"),
+                )
+            )
+        if not rows:
+            return pl.DataFrame()
+        return pl.concat(rows, how="diagonal_relaxed")
 
     def waterfall_df(self, state: ViewState) -> pl.DataFrame:
         t0, t1 = state.t_us(self.info.t0_us)

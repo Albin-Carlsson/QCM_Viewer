@@ -9,10 +9,10 @@ from dataclasses import dataclass
 
 # --- look and feel -----------------------------------------------------------
 
-ACCENT = "#7dd3fc"
+ACCENT = "#2563eb"
 HEADER_BG = "#0f172a"
-PLOT_HEIGHT = 300
-HERO_HEIGHT = 380
+PLOT_HEIGHT = 320
+HERO_HEIGHT = 460
 
 # Max points sent to the browser *per line*. Pyramid frames can carry tens of
 # thousands of points per group when the sweep rate is high; a plot is ~1200px

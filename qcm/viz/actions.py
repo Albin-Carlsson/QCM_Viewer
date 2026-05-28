@@ -66,7 +66,13 @@ class ViewerActions:
 
     def add_window_marker(self, _event=None) -> None:
         state = self.controls.state()
-        t0, t1 = state.t_us(self.info.t0_us)
+        if hasattr(self.controls, "mark_range"):
+            start_s, end_s = (float(v) for v in self.controls.mark_range.value)
+            t0 = int(self.info.t0_us + start_s * _US)
+            t1 = int(self.info.t0_us + end_s * _US)
+        else:
+            t0, t1 = state.t_us(self.info.t0_us)
+            start_s, end_s = state.t_range_s
         f0, f1 = state.frequency_band
         label = self._marker_label()
         kind = self.controls.region_type.value
@@ -82,11 +88,15 @@ class ViewerActions:
         self.controls.annotation_version.value += 1
         self.controls.region_label.value = ""
         self.refresh_marker_options()
-        self.notify(f"Saved region “{label}” for the current range.", "success")
+        self.notify(f"Saved phase “{label}” ({start_s:,.2f}–{end_s:,.2f} s).", "success")
 
     def add_point_marker(self, _event=None) -> None:
         state = self.controls.state()
-        mid_s = (state.t_range_s[0] + state.t_range_s[1]) / 2
+        if hasattr(self.controls, "mark_range"):
+            start_s, end_s = (float(v) for v in self.controls.mark_range.value)
+            mid_s = (start_s + end_s) / 2
+        else:
+            mid_s = (state.t_range_s[0] + state.t_range_s[1]) / 2
         t = int(self.info.t0_us + mid_s * _US)
         label = self._marker_label()
         kind = self.controls.region_type.value
@@ -164,6 +174,39 @@ class ViewerActions:
     def save_state(self, _event=None) -> None:
         out = self.run.save_view_state(self.controls.state().to_persisted_dict())
         self.notify(f"Saved workspace → {out.name}", "success")
+
+    def apply_brush(self, boundsx=None) -> None:
+        """Set the current or zero/reference range from a plot box-selection.
+
+        ``boundsx`` is the ``(x0, x1)`` tuple emitted by an ``hv.streams.BoundsX``
+        stream in elapsed seconds. Which range it targets is chosen by the
+        ``brush_mode`` toggle so the same gesture can define either the analysis
+        window or the baseline without a second slider.
+        """
+        if not boundsx:
+            return
+        try:
+            lo, hi = (float(v) for v in boundsx)
+        except (TypeError, ValueError):
+            return
+        if lo > hi:
+            lo, hi = hi, lo
+        if abs(hi - lo) < 1e-9:
+            return
+        mode = self.controls.brush_mode.value
+        if mode == "reference":
+            previous = tuple(float(v) for v in self.controls.baseline_range.value)
+            if previous != (lo, hi):
+                self.controls._last_baseline = previous
+                self.controls.revert_baseline.disabled = False
+            self.controls.set_reference_range_values(lo, hi)
+            self.notify(f"Reference range set to {lo:,.2f}–{hi:,.2f} s.", "success")
+        elif mode == "mark":
+            self.controls.set_mark_range_values(lo, hi)
+            self.notify(f"Mark range set to {lo:,.2f}–{hi:,.2f} s. Name it and save phase.", "success")
+        else:
+            self.controls.set_current_range_values(lo, hi)
+            self.notify(f"Analysis range set to {lo:,.2f}–{hi:,.2f} s.", "success")
 
     def jump_to_seconds(self, seconds) -> None:
         if seconds is None:
