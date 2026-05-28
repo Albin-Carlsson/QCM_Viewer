@@ -8,7 +8,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from .demo import make_demo_data
+from .demo import PRESETS, make_demo_data
 from .ingest import ingest
 from .run import open_run
 
@@ -17,15 +17,67 @@ console = Console()
 
 
 @app.command("demo-data")
-def demo_data(out_dir: Path, groups: int = 3, sequences: int = 250, points_per_sweep: int = 500):
-    path = make_demo_data(out_dir, groups=groups, sequences=sequences, points_per_sweep=points_per_sweep)
-    console.print(f"Wrote demo parquet: {path}")
+def demo_data(
+    out_dir: Path,
+    preset: str = typer.Option(
+        "small",
+        "--preset",
+        "-p",
+        help="Demo size preset: small for quick testing, long for a ~500 MB stress-test stream.",
+    ),
+    target_mb: int | None = typer.Option(
+        None,
+        "--target-mb",
+        help="Approximate parquet file size target. Defaults to 500 MB for --preset long.",
+    ),
+    groups: int | None = typer.Option(None, help="Override number of overtones/groups."),
+    sequences: int | None = typer.Option(None, help="Override number of sweeps. Long preset usually stops by --target-mb first."),
+    points_per_sweep: int | None = typer.Option(None, help="Override number of frequency points per sweep."),
+    compression: str | None = typer.Option(
+        None,
+        help="Parquet compression: zstd, snappy, or none. Long preset defaults to none for predictable size.",
+    ),
+):
+    if preset not in PRESETS:
+        valid = ", ".join(PRESETS)
+        raise typer.BadParameter(f"Unknown preset {preset!r}. Choose one of: {valid}")
+    path = make_demo_data(
+        out_dir,
+        preset=preset,
+        groups=groups,
+        sequences=sequences,
+        points_per_sweep=points_per_sweep,
+        target_mb=target_mb,
+        compression=compression,
+    )
+    size_mb = path.stat().st_size / (1024 * 1024)
+    console.print(f"Wrote {preset} demo parquet: {path} ({size_mb:.1f} MB)")
 
 
 @app.command(name="ingest")
-def ingest_cmd(source: Path, dest: Path, overwrite: bool = typer.Option(False, "--overwrite")):
-    out = ingest(source, dest, overwrite=overwrite)
-    console.print(f"Ingested run: {out}")
+def ingest_cmd(
+    source: Path,
+    dest: Path,
+    overwrite: bool = typer.Option(False, "--overwrite"),
+    raw_part_rows: int = typer.Option(
+        1_000_000,
+        "--raw-part-rows",
+        help="Rows per raw parquet part written during ingest. Lower this if memory is tight.",
+    ),
+    memory_limit: str = typer.Option(
+        "4GB",
+        "--memory-limit",
+        help="DuckDB memory limit during index/pyramid build, e.g. 2GB, 4GB, 8GB.",
+    ),
+):
+    out = ingest(
+        source,
+        dest,
+        overwrite=overwrite,
+        raw_part_rows=raw_part_rows,
+        memory_limit=memory_limit,
+    )
+    console.print(f"Ingested optimized run: {out}")
 
 
 
@@ -51,11 +103,12 @@ def diagnose(run_path: Path):
             if level == "sweeps":
                 tic_df, tic_meta = run.timeline(["fit_center"], level="raw", include_meta=True)
             elif level == "raw":
-                import time
-                tic = time.perf_counter()
-                tic_df = run._read_parquet("raw", ["fit_center"], run.time_start, run.time_end, None)
-                elapsed = (time.perf_counter() - tic) * 1000
-                bench.add_row("raw frequency table", str(tic_df.height), f"{elapsed:.1f} ms", "OK")
+                bench.add_row(
+                    "raw frequency table",
+                    str(run.manifest.metadata.get("rows", "?")),
+                    "skipped",
+                    "OK: raw full scan intentionally avoided",
+                )
                 continue
             else:
                 tic_df, tic_meta = run.timeline(["fit_center"], level=level, include_meta=True)

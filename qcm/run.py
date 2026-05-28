@@ -22,6 +22,14 @@ class QCMRun:
         self.manifest = Manifest.load(self.path)
         self.id = self.manifest.run_id
         self.conn = duckdb.connect(database=":memory:")
+        # Read-side tuning: parallel parquet scans and no insertion-order bookkeeping.
+        # Our queries carry explicit ORDER BY where order matters, so dropping
+        # insertion-order tracking is safe and cuts per-query overhead.
+        self.conn.execute("PRAGMA threads=4")
+        self.conn.execute("SET preserve_insertion_order=false")
+        # The sweep index is static for a run; cache the unfiltered read so the
+        # app's repeated calls (init, tap-to-jump, readouts) hit memory.
+        self._sweep_index_full: pl.DataFrame | None = None
 
     @property
     def time_start(self) -> int:
@@ -175,6 +183,9 @@ class QCMRun:
         return self.conn.execute(sql, params).pl()
 
     def sweep_index(self, t0: int | str | None = None, t1: int | str | None = None, groups: list[int] | None = None) -> pl.DataFrame:
+        is_full = t0 is None and t1 is None and not groups
+        if is_full and self._sweep_index_full is not None:
+            return self._sweep_index_full
         path = self.path / self.manifest.paths.sweeps
         start = parse_time(t0, self.time_start)
         end = parse_time(t1, self.time_end)
@@ -184,6 +195,39 @@ class QCMRun:
             sql += " AND \"group\" IN (" + ",".join("?" for _ in groups) + ")"
             params.extend([int(g) for g in groups])
         sql += ' ORDER BY timestamp, "group"'
+        df = self.conn.execute(sql, params).pl()
+        if is_full:
+            self._sweep_index_full = df
+        return df
+
+    def baseline_mean(
+        self,
+        value_expr: str,
+        t0: int | str | None = None,
+        t1: int | str | None = None,
+        groups: list[int] | None = None,
+    ) -> pl.DataFrame:
+        """Per-group mean of a raw value expression over a time window, in SQL.
+
+        ``value_expr`` is a DuckDB scalar expression over the raw fit columns
+        (e.g. ``fit_center`` or ``fit_fwhm / fit_center * 1e6``). DuckDB prunes
+        row groups by the ``timestamp`` predicate and only the per-group average
+        crosses into Python, so a referenced quantity no longer materializes the
+        whole baseline window. Returns ``[group, baseline]`` — the exact mean,
+        identical to averaging the per-row values in Polars.
+        """
+        raw_path = self._parquet_glob("raw")
+        start = parse_time(t0, self.time_start)
+        end = parse_time(t1, self.time_end)
+        sql = (
+            f'SELECT "group", avg({value_expr})::DOUBLE AS baseline '
+            f"FROM read_parquet('{raw_path}') WHERE timestamp >= ? AND timestamp <= ?"
+        )
+        params: list[object] = [int(start), int(end)]
+        if groups:
+            sql += " AND \"group\" IN (" + ",".join("?" for _ in groups) + ")"
+            params.extend([int(g) for g in groups])
+        sql += ' GROUP BY "group" ORDER BY "group"'
         return self.conn.execute(sql, params).pl()
 
     def region_stats(
@@ -284,31 +328,28 @@ class QCMRun:
         except Exception:
             return {}
 
-    def to_notebook(self, output: str | Path, columns: list[str] | None = None, t0=None, t1=None, groups: list[int] | None = None) -> Path:
-        import nbformat as nbf
-        out = Path(output)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        columns = columns or ["fit_center", "fit_fwhm"]
-        t0p = parse_time(t0, self.time_start)
-        t1p = parse_time(t1, self.time_end)
-        nb = nbf.v4.new_notebook()
-        code = f'''import qcm
-run = qcm.open_run(r"{self.path}")
+    def to_notebook(
+        self,
+        output: str | Path,
+        columns: list[str] | None = None,
+        t0=None,
+        t1=None,
+        groups: list[int] | None = None,
+        region_label: str = "current range",
+        quantity_key: str = "sauerbrey_mass",
+    ) -> Path:
+        from .notebooks import write_analysis_notebook
 
-# Same time range and groups as the exported viewer state
-data = run.timeline({columns!r}, t0={t0p!r}, t1={t1p!r}, groups={groups!r})
-stats = run.region_stats({columns!r}, t0={t0p!r}, t1={t1p!r}, groups={groups!r})
-annotations = run.annotations(t0={t0p!r}, t1={t1p!r})
-
-data.head(), stats
-'''
-        nb.cells = [
-            nbf.v4.new_markdown_cell(f"# QCM analysis: {self.id}"),
-            nbf.v4.new_markdown_cell("Generated from QCM Viewer. The code below reproduces the selected view."),
-            nbf.v4.new_code_cell(code),
-        ]
-        nbf.write(nb, out)
-        return out
+        return write_analysis_notebook(
+            self,
+            output,
+            columns=columns,
+            t0=t0,
+            t1=t1,
+            groups=groups,
+            region_label=region_label,
+            quantity_key=quantity_key,
+        )
 
 
 def open_run(path: str | Path) -> QCMRun:

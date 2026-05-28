@@ -1,6 +1,16 @@
 # Python
 __pycache__/
 *.py[cod]
+
+# Test / lint / coverage caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Packaging
 *.egg-info/
 .eggs/
 build/
@@ -21,9 +31,15 @@ env/
 
 # Jupyter
 .ipynb_checkpoints/
+qcm_view.ipynb
+qcm_region_analysis.ipynb
 
 # Generated / regenerable data (see README: qcm demo-data / qcm ingest)
 demo_raw/
+demo-run/
 demo_run/
+example-run/
 example_run/
+view-run/
+view_run/
 *.parquet

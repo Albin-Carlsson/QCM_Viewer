@@ -14,6 +14,13 @@ HEADER_BG = "#0f172a"
 PLOT_HEIGHT = 300
 HERO_HEIGHT = 380
 
+# Max points sent to the browser *per line*. Pyramid frames can carry tens of
+# thousands of points per group when the sweep rate is high; a plot is ~1200px
+# wide, so anything beyond a couple thousand points per curve only slows Bokeh's
+# redraw without adding visible detail. Curves are decimated with a min/max
+# envelope (see plots._decimate_xy) so spikes/artifacts survive the downsample.
+MAX_PLOT_POINTS = 2000
+
 # Reference-region (baseline) and event annotation colors.
 BASELINE_COLOR = "#22c55e"
 EVENT_COLOR = "#f97316"

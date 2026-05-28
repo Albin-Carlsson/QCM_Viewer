@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import holoviews as hv
 import hvplot.polars  # noqa: F401  (registers .hvplot on Polars frames)
+import numpy as np
 import polars as pl
 
 from .theme import (
     BASELINE_COLOR,
     EVENT_COLOR,
     HERO_HEIGHT,
+    MAX_PLOT_POINTS,
     PLOT_HEIGHT,
     Quantity,
     color_for_slot,
@@ -23,6 +25,34 @@ from .theme import (
 
 X = "elapsed_s"
 X_LABEL = "Time [s]"
+
+
+def _decimate_xy(x: np.ndarray, y: np.ndarray, max_points: int = MAX_PLOT_POINTS):
+    """Min/max envelope decimation of a single x-monotonic series.
+
+    Splits the series into ``max_points // 2`` contiguous buckets and keeps the
+    minimum and maximum sample of each (plus the endpoints), so the curve's
+    visual envelope — including spikes and artifacts — is preserved while the
+    point count sent to Bokeh is bounded. Returns the inputs unchanged when they
+    are already small enough.
+    """
+    n = len(x)
+    if max_points <= 0 or n <= max_points:
+        return x, y
+    buckets = max(1, max_points // 2)
+    bins = (np.arange(n) * buckets // n)
+    # Sort by bucket, then value: the first index in each bucket is its min, the
+    # last is its max. One vectorized pass, no Python loop over buckets.
+    order = np.lexsort((y, bins))
+    sorted_bins = bins[order]
+    bucket_ids = np.arange(buckets)
+    first = np.searchsorted(sorted_bins, bucket_ids, side="left")
+    last = np.searchsorted(sorted_bins, bucket_ids, side="right") - 1
+    valid = last >= first
+    lo = order[first[valid]]
+    hi = order[last[valid]]
+    keep = np.unique(np.concatenate([lo, hi, [0, n - 1]]))
+    return x[keep], y[keep]
 
 
 # --------------------------------------------------------------------- helpers
@@ -38,9 +68,9 @@ def series_labels(groups: list[int], orders: dict[int, int]) -> dict[int, str]:
     return {g: f"group {g}" for g in groups}
 
 
-def _xy(value_df: pl.DataFrame, group: int):
+def _xy(value_df: pl.DataFrame, group: int, max_points: int = MAX_PLOT_POINTS):
     sub = value_df.filter(pl.col("group") == group).drop_nulls("value")
-    return sub[X].to_numpy(), sub["value"].to_numpy()
+    return _decimate_xy(sub[X].to_numpy(), sub["value"].to_numpy(), max_points)
 
 
 def _legend_mute_hook(plot, _element):
@@ -54,15 +84,65 @@ def _legend_mute_hook(plot, _element):
 
 
 def annotation_elements(spans) -> list:
-    """``spans`` is a list of (kind, x0_s, x1_s) tuples already in seconds."""
+    """Return saved-region overlays.
+
+    Labels are drawn by ``_saved_region_label_hook`` so they appear inside the
+    plot area instead of only in a legend.
+    """
     elements = []
-    for kind, x0, x1 in spans:
-        if kind in {"range", "reference_region", "excluded_region"} and x1 is not None and x1 != x0:
-            color = BASELINE_COLOR if kind == "reference_region" else EVENT_COLOR
-            elements.append(hv.VSpan(x0, x1).opts(color=color, alpha=0.12))
+    for item in spans:
+        plot_type, x0, x1 = item[:3]
+        is_interval = plot_type in {"range", "reference_region", "excluded_region"} and x1 is not None and x1 != x0
+        color = BASELINE_COLOR if plot_type == "reference_region" else EVENT_COLOR
+        if is_interval:
+            elements.append(hv.VSpan(x0, x1).opts(color=color, alpha=0.11))
+            elements.append(hv.VLine(x0).opts(color=color, line_dash="dotted", line_width=1))
+            elements.append(hv.VLine(x1).opts(color=color, line_dash="dotted", line_width=1))
         else:
-            elements.append(hv.VLine(x0).opts(color=EVENT_COLOR, line_dash="dashed", line_width=1))
+            elements.append(hv.VLine(x0).opts(color=color, line_dash="dashed", line_width=1.4))
     return elements
+
+
+def _saved_region_label_hook(spans):
+    """Draw saved region names inside Bokeh plots.
+
+    HoloViews spans/lines do not reliably render text labels in the data area,
+    so this hook adds lightweight Bokeh labels near the bottom of the viewport.
+    The label follows the x data coordinate and stays readable when zooming.
+    """
+    def hook(plot, _element):
+        if not spans:
+            return
+        try:
+            from bokeh.models import Label
+
+            fig = plot.state
+            for item in spans:
+                plot_type, x0, x1 = item[:3]
+                label = item[3] if len(item) > 3 else ""
+                marker_kind = item[4] if len(item) > 4 else "region"
+                if not label:
+                    continue
+                is_interval = plot_type in {"range", "reference_region", "excluded_region"} and x1 is not None and x1 != x0
+                x = (float(x0) + float(x1)) / 2 if is_interval else float(x0)
+                text = f"{marker_kind}: {label}"
+                fig.add_layout(Label(
+                    x=x,
+                    y=8,
+                    x_units="data",
+                    y_units="screen",
+                    text=text,
+                    text_font_size="9pt",
+                    text_color=EVENT_COLOR,
+                    background_fill_color="#0f172a",
+                    background_fill_alpha=0.75,
+                    border_line_alpha=0.0,
+                    text_baseline="bottom",
+                    text_align="center",
+                ))
+        except Exception:
+            pass
+    return hook
 
 
 def baseline_span(x0: float, x1: float) -> hv.VSpan:
@@ -100,8 +180,8 @@ def timeline(
     return hv.Overlay(elements).opts(
         hv.opts.Overlay(
             title=title, height=height, responsive=True, legend_position="right",
-            active_tools=["wheel_zoom"], tools=["crosshair"],
-            hooks=[_legend_mute_hook], show_grid=True,
+            active_tools=["wheel_zoom"], tools=["hover", "crosshair", "box_zoom", "reset"],
+            hooks=[_legend_mute_hook, _saved_region_label_hook(annotation_spans or [])], show_grid=True,
         ),
         hv.opts.Curve(tools=["hover"]),
     )
@@ -132,6 +212,7 @@ def dual_axis_qcmd(
     orders: dict[int, int],
     title: str,
     baseline: tuple[float, float] | None = None,
+    annotation_spans: list | None = None,
 ):
     """Canonical QCM-D plot: Δf/n (left, solid) and ΔD (right, dashed)."""
     labels = series_labels(groups, orders)
@@ -159,12 +240,12 @@ def dual_axis_qcmd(
     d_lo = float(d_vals.min()) if d_vals.len() else 0.0
     d_hi = float(d_vals.max()) if d_vals.len() else 1.0
 
-    elements = ([baseline_span(*baseline)] if baseline is not None else []) + left + right
+    elements = ([baseline_span(*baseline)] if baseline is not None else []) + annotation_elements(annotation_spans or []) + left + right
     return hv.Overlay(elements).opts(
         hv.opts.Overlay(
             title=title, height=HERO_HEIGHT, responsive=True, legend_position="right",
-            active_tools=["wheel_zoom"], tools=["crosshair"],
-            hooks=[_twin_axis_hook(d_lo, d_hi, "ΔD  [×10⁻⁶]"), _legend_mute_hook],
+            active_tools=["wheel_zoom"], tools=["hover", "crosshair", "box_zoom", "reset"],
+            hooks=[_twin_axis_hook(d_lo, d_hi, "ΔD  [×10⁻⁶]"), _legend_mute_hook, _saved_region_label_hook(annotation_spans or [])],
             show_grid=True,
         ),
         hv.opts.Curve(tools=["hover"]),
@@ -184,8 +265,15 @@ def df_fingerprint(norm_df: pl.DataFrame, d_df: pl.DataFrame, groups: list[int],
         sub = joined.filter(pl.col("group") == g)
         if sub.is_empty():
             continue
+        dfx = sub["df"].to_numpy()
+        dDy = sub["dD"].to_numpy()
+        # Phase portrait: x is not time-monotonic, so envelope decimation does not
+        # apply. Cap the trajectory with a uniform stride to bound browser cost.
+        if len(dfx) > MAX_PLOT_POINTS:
+            step = len(dfx) // MAX_PLOT_POINTS + 1
+            dfx, dDy = dfx[::step], dDy[::step]
         paths.append(
-            hv.Curve((sub["df"].to_numpy(), sub["dD"].to_numpy()), "Δf / n  [Hz]", "ΔD  [×10⁻⁶]", label=labels[g]).opts(
+            hv.Curve((dfx, dDy), "Δf / n  [Hz]", "ΔD  [×10⁻⁶]", label=labels[g]).opts(
                 color=color_for_slot(slot), line_width=1.6
             )
         )
@@ -195,7 +283,7 @@ def df_fingerprint(norm_df: pl.DataFrame, d_df: pl.DataFrame, groups: list[int],
         hv.opts.Overlay(
             title="Df plot — ΔD vs Δf/n (viscoelastic fingerprint)",
             height=PLOT_HEIGHT, responsive=True, legend_position="right",
-            active_tools=["wheel_zoom"], tools=["crosshair"],
+            active_tools=["wheel_zoom"], tools=["hover", "crosshair", "box_zoom", "reset"],
             hooks=[_legend_mute_hook], show_grid=True,
         ),
         hv.opts.Curve(tools=["hover"]),
@@ -211,24 +299,180 @@ def waterfall(df: pl.DataFrame, title: str):
         rasterize=True, dynspread=False, cmap="viridis",
         responsive=True, height=PLOT_HEIGHT, title=title,
         xlabel=X_LABEL, ylabel="Frequency [Hz]", clabel="Conductance",
-    ).opts(active_tools=["wheel_zoom"], tools=["hover", "crosshair"], show_grid=True)
+    ).opts(active_tools=["wheel_zoom"], tools=["hover", "crosshair", "box_zoom", "reset"], show_grid=True)
+
+SWEEP_PANEL_HEIGHT = 220
 
 
-def sweep_curves(df: pl.DataFrame, title: str):
+def _sweep_center(sub: pl.DataFrame, f: "np.ndarray") -> float:
+    """Best resonance center for a single-overtone sweep."""
+    if "fit_center" in sub.columns:
+        c = sub["fit_center"].drop_nulls()
+        if c.len():
+            center = float(c[0])
+            if f.min() <= center <= f.max():
+                return center
+
+    if "conductance" in sub.columns and sub.height:
+        return float(f[int(sub["conductance"].arg_max() or 0)])
+
+    return float(f[len(f) // 2])
+
+
+def _force_x_range_hook(lo: float, hi: float):
+    """Force Bokeh to render each sweep panel tightly around its own data."""
+    def hook(plot, _element):
+        try:
+            fig = plot.state
+            pad = (hi - lo) * 0.02 or 1.0
+            start = lo - pad
+            end = hi + pad
+
+            fig.x_range.start = start
+            fig.x_range.end = end
+            fig.x_range.reset_start = start
+            fig.x_range.reset_end = end
+        except Exception:
+            pass
+
+    return hook
+
+
+def _numeric_fit_columns(sub: pl.DataFrame) -> list[str]:
+    """Return saved numeric fit columns, excluding scalar fit parameters."""
+    excluded = {
+        "fit_center",
+        "fit_width",
+        "fit_gamma",
+        "fit_amplitude",
+        "fit_offset",
+        "fit_phase",
+        "fit_quality",
+        "fit_error",
+        "fit_rmse",
+        "fit_r2",
+    }
+
+    cols = []
+    for c in sub.columns:
+        cl = c.lower()
+        if "fit" not in cl:
+            continue
+        if cl in excluded:
+            continue
+        if not sub[c].dtype.is_numeric():
+            continue
+        if sub[c].null_count() >= sub.height:
+            continue
+        if sub[c].n_unique() <= 1:
+            continue
+        cols.append(c)
+
+    return cols
+
+
+def sweep_curves(df: pl.DataFrame, orders: dict[int, int] | None = None) -> list:
+    """One zoomed resonance panel per overtone, including saved fit curves.
+
+    Each overtone gets its own independent Bokeh x-range. This prevents high
+    overtones that are MHz apart from forcing every resonance to look like a
+    narrow spike.
+
+    Any numeric saved curve column containing "fit" is plotted as a fit curve,
+    except scalar fit-parameter columns such as fit_center.
+    """
     if df.is_empty():
-        return empty("No sweep")
-    return df.hvplot.line(
-        x="frequency", y=["conductance", "susceptance"], by="group",
-        responsive=True, height=PLOT_HEIGHT, title=title,
-        xlabel="Frequency [Hz]", ylabel="Signal [a.u.]",
-    ).opts(active_tools=["wheel_zoom"], tools=["hover", "crosshair"], legend_position="right", show_grid=True)
+        return [empty("No sweep")]
+
+    orders = orders or {}
+    groups = sorted(int(g) for g in df["group"].unique().to_list())
+    panels = []
+
+    for slot, g in enumerate(groups):
+        sub = df.filter(pl.col("group") == g).sort("frequency")
+        if sub.is_empty():
+            continue
+
+        f = sub["frequency"].to_numpy()
+        gcond = sub["conductance"].to_numpy()
+        bsusc = sub["susceptance"].to_numpy()
+
+        lo = float(np.nanmin(f))
+        hi = float(np.nanmax(f))
+
+        color = color_for_slot(slot)
+        n = orders.get(g)
+        who = f"n={n}" if n and n > 1 else f"group {g}"
+        center = _sweep_center(sub, f)
+
+        curves = [
+            hv.Curve(
+                (f, gcond),
+                "Frequency [Hz]",
+                "Signal [a.u.]",
+                label="G data",
+            ).opts(
+                color=color,
+                line_width=1.9,
+            ),
+            hv.Curve(
+                (f, bsusc),
+                "Frequency [Hz]",
+                "Signal [a.u.]",
+                label="B data",
+            ).opts(
+                color=color,
+                line_width=1.3,
+                line_dash="dashed",
+                alpha=0.8,
+            ),
+        ]
+
+        for fit_col in _numeric_fit_columns(sub):
+            curves.append(
+                hv.Curve(
+                    (f, sub[fit_col].to_numpy()),
+                    "Frequency [Hz]",
+                    "Signal [a.u.]",
+                    label=fit_col,
+                ).opts(
+                    color=color,
+                    line_width=2.1,
+                    line_dash="dotdash",
+                    alpha=0.95,
+                )
+            )
+
+        panels.append(
+            hv.Overlay(curves).opts(
+                hv.opts.Overlay(
+                    title=f"{who} · f₀ ≈ {center:,.0f} Hz",
+                    height=SWEEP_PANEL_HEIGHT,
+                    responsive=True,
+                    framewise=True,
+                    axiswise=True,
+                    shared_axes=False,
+                    legend_position="top_right",
+                    active_tools=["wheel_zoom"],
+                    tools=["hover", "crosshair", "box_zoom", "reset"],
+                    hooks=[_force_x_range_hook(lo, hi), _legend_mute_hook],
+                    show_grid=True,
+                ),
+                hv.opts.Curve(tools=["hover"]),
+            )
+        )
+
+    return panels or [empty("No sweep")]
 
 
 def iq_scatter(df: pl.DataFrame, title: str):
     if df.is_empty():
         return empty("No I/Q")
+    # Do not rasterize the I/Q scatter. Rasterized points stay pixel-sized when
+    # zooming, which makes zoom feel like it reveals less information. Native
+    # Bokeh markers keep their visual size and remain inspectable.
     return df.hvplot.scatter(
-        x="raw_i", y="raw_q", by="group", rasterize=True,
-        responsive=True, height=PLOT_HEIGHT, title=title,
+        x="raw_i", y="raw_q", by="group",
+        responsive=True, height=PLOT_HEIGHT, title=title, size=5, alpha=0.65,
         xlabel="Raw I [a.u.]", ylabel="Raw Q [a.u.]",
-    ).opts(active_tools=["wheel_zoom"], tools=["hover", "crosshair"], show_grid=True)
+    ).opts(active_tools=["wheel_zoom"], tools=["hover", "box_zoom", "reset"], show_grid=True)
