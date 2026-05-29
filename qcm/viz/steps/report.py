@@ -18,7 +18,3 @@ class ReportStep(BaseStep):
             title="Export", collapsible=False, margin=0,
             sizing_mode="stretch_width", css_classes=["qcm-secondary"],
         )
-
-    def view(self):
-        return pn.Column(self.anchor_plot(), self.secondary_panel(),
-                         margin=0, sizing_mode="stretch_width")
