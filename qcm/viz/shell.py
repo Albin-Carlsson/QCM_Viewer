@@ -100,8 +100,11 @@ class ViewerShell:
                 )
                 btn.on_click(self._go(i))
                 buttons.append(btn)
-            return pn.Column(*buttons, margin=0, css_classes=["qcm-focus-rail"])
-        return pn.bind(render, self.focus)
+            return pn.Column(*buttons, margin=0, sizing_mode="stretch_width")
+        return pn.Column(
+            pn.bind(render, self.focus),
+            margin=0, sizing_mode="stretch_width", css_classes=["qcm-focus-rail"],
+        )
 
     def anchor(self):
         def render(active, *_):
