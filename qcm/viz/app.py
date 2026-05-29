@@ -19,6 +19,7 @@ import panel as pn
 
 from qcm.run import open_run
 
+from . import echem
 from .actions import ViewerActions
 from .controls import ViewerControls
 from .data import QCMViewData
@@ -90,6 +91,7 @@ class QCMViewer:
             seq_max=seq_max,
             n_sweeps=n_sweeps,
             rows=self.run.manifest.metadata.get("rows", "?"),
+            has_echem=echem.has_echem(self.run.columns),
         )
 
     def view(self):

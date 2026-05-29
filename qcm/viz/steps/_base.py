@@ -276,7 +276,8 @@ class BaseStep:
             return "—"
         return f"{value:,.{digits}f}{suffix}"
 
-    def unified_anchor(self, window: str = "current", state=None, height: int = HERO_HEIGHT):
+    def unified_anchor(self, window: str = "current", state=None, height: int = HERO_HEIGHT,
+                       show_legend: bool = True):
         """The single configurable analysis plot shown on every page.
 
         Plots the selected y-quantity against the selected x-axis over the full
@@ -295,9 +296,35 @@ class BaseStep:
 
             companion_df = None
             companion_groups = None
-            if ax.is_time and q.is_resonance and q.key != "delta_D":
-                companion_df, _ = self.data.value_df(full, "delta_D", "time")
-                companion_groups = self.controls.dissipation_groups()
+            companion_axis_label = None
+            companion_prefix = None
+            right_sel = getattr(self.controls, "quantity_select_right", None)
+            right_key = right_sel.value if right_sel is not None else "delta_D"
+            # The second axis is a vs-time comparison of two distinct signals:
+            # drawn whenever a distinct right-axis quantity is chosen on the time
+            # axis. "None (single axis)" gives a single-quantity plot. (The control
+            # itself is disabled off the time axis, so this stays consistent.)
+            want_twin = right_key not in (None, "__none__", state.quantity)
+            if ax.is_time and want_twin:
+                companion_df, _ = self.data.value_df(full, right_key, "time")
+                rq = quantity(right_key)
+                if right_key == "delta_D":
+                    companion_groups = self.controls.dissipation_groups()
+                elif rq.is_echem:
+                    # Cell-level signals are identical across overtones — draw once.
+                    companion_groups = full.groups[:1]
+                else:
+                    companion_groups = full.groups
+                companion_axis_label = rq.axis_label
+                companion_prefix = rq.label
+
+            show_phases_w = getattr(self.controls, "show_phases", None)
+            show_phases = bool(show_phases_w.value) if show_phases_w is not None else True
+            spans = self.data.annotation_spans(state) if show_phases else []
+
+            show_cycles_w = getattr(self.controls, "show_cycles", None)
+            show_cycles = bool(show_cycles_w.value) if show_cycles_w is not None else False
+            cycle_spans = self.data.cycle_spans() if (show_cycles and ax.is_time) else None
 
             visible_groups = self.controls.frequency_groups() if q.kind == "frequency" else full.groups
 
@@ -319,14 +346,33 @@ class BaseStep:
                 companion_df=companion_df,
                 visible_groups=visible_groups,
                 companion_groups=companion_groups,
+                companion_axis_label=companion_axis_label,
+                companion_prefix=companion_prefix,
                 baseline=state.baseline_s if (q.referenced and window != "reference") else None,
                 window=win,
-                annotation_spans=self.data.annotation_spans(state),
+                annotation_spans=spans,
                 select_x=ax.is_time,
                 height=height,
+                show_legend=show_legend,
+                cycle_spans=cycle_spans,
             )
+            zero_w = getattr(self.controls, "zero_line", None)
+            if zero_w is not None and bool(zero_w.value):
+                try:
+                    plot = plot * hv.HLine(0).opts(color="#94a3b8", line_dash="dashed", line_width=1)
+                except Exception:
+                    pass
             if ax.is_time:
                 plot = self.with_phase_labels(plot, value_df, height=height)
+            # Legend options must be set on the OUTERMOST overlay — composing the
+            # plot with the zero line / phase labels (the ``*`` above) creates a new
+            # container that otherwise reverts to a default inside top-right legend,
+            # which overlaps the curves on the dense main graph and reads as missing.
+            try:
+                plot = plot.opts(hv.opts.Overlay(show_legend=show_legend, legend_position="right"))
+            except Exception:
+                pass
+            if ax.is_time:
                 return self.interactive_plot(self.force_plot_height(plot, height))
             return self.nearest_hover(self.force_plot_height(plot, height))
         except Exception as exc:  # pragma: no cover

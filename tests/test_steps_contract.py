@@ -8,16 +8,24 @@ def _viewer(demo_run_path):
     return QCMViewer(str(demo_run_path))
 
 
-def test_base_overview_anchor_builds(demo_run_path):
+def test_data_anchor_builds(demo_run_path):
     v = _viewer(demo_run_path)
-    step = v.shell._steps["review"]
-    obj = step.overview_anchor("current")
+    obj = v.shell._data_plot.overview_anchor("current")
     assert obj is not None
 
 
-def test_every_step_has_anchor_and_secondary(demo_run_path):
+def test_three_pages_build(demo_run_path):
+    """The three-page redesign exposes a buildable surface per mode."""
     v = _viewer(demo_run_path)
-    for sid in ("review", "reference", "phases", "quantify", "echem", "report"):
-        step = v.shell._steps[sid]
-        assert step.anchor_plot() is not None, f"{sid} anchor_plot"
-        assert isinstance(step.secondary_panel(), pn.viewable.Viewable), f"{sid} secondary_panel"
+    pages = {
+        "data": v.shell._page_data,
+        "results": v.shell._page_results,
+        "report": v.shell._page_report,
+    }
+    for name, page in pages.items():
+        assert isinstance(page, pn.viewable.Viewable), f"{name} page not viewable"
+
+    # The step objects that feed those pages each render their main surface.
+    assert v.shell._results.page() is not None
+    assert v.shell._report.page() is not None
+    assert isinstance(v.shell._report.secondary_panel(), pn.viewable.Viewable)

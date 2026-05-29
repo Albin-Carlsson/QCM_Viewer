@@ -20,27 +20,35 @@ def test_app_builds(demo_run_path):
     assert hasattr(view, "servable")
 
 
-def test_triad_present_in_every_focus(demo_run_path):
+def test_pages_render_per_mode(demo_run_path):
+    """Each top-level mode mounts its own page with the expected regions."""
     from qcm.viz.app import QCMViewer
     viewer = QCMViewer(str(demo_run_path))
-    for i in range(len(nav.STEPS)):
-        viewer.shell.focus.value = i
+    expected = {
+        "data": ("qcm-page-data", "qcm-toolbar2", "qcm-anchor", "qcm-rail", "qcm-stats"),
+        "results": ("qcm-page-results",),
+        "report": ("qcm-page-report",),
+    }
+    for i, mode in enumerate(nav.MODES):
+        viewer.shell.mode.value = i
         classes = _classes(viewer.shell.view())
-        for region in ("qcm-anchor", "qcm-selection-bar", "qcm-stats", "qcm-focus-rail"):
-            assert region in classes, f"{region} missing in focus {nav.step_id(i)}"
+        for region in expected[mode.id]:
+            assert region in classes, f"{region} missing on page {mode.id}"
+        # Pages are mutually exclusive: only the active page is mounted.
+        for other in nav.MODES:
+            if other.id != mode.id:
+                assert f"qcm-page-{other.id}" not in classes, f"{other.id} leaked onto {mode.id}"
 
 
-def test_focus_change_keeps_controls_state(demo_run_path):
+def test_mode_change_keeps_controls_state(demo_run_path):
     from qcm.viz.app import QCMViewer
     viewer = QCMViewer(str(demo_run_path))
     ctrls = viewer.shell.controls
     ctrls.t_range.value = (10.0, 20.0)
-    viewer.shell.focus.value = 3  # Quantify
+    viewer.shell.mode.value = nav.mode_index("results")
     assert tuple(ctrls.t_range.value) == (10.0, 20.0)
-    # Brush target follows the focus.
-    assert ctrls.brush_mode.value == nav.brush_target_for_step("quantify")
-    viewer.shell.focus.value = 2  # Phases
-    assert ctrls.brush_mode.value == nav.brush_target_for_step("phases")
+    viewer.shell.mode.value = nav.mode_index("data")
+    assert tuple(ctrls.t_range.value) == (10.0, 20.0)
 
 
 def test_drawer_toggles(demo_run_path):

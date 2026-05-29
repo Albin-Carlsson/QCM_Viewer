@@ -23,6 +23,7 @@ class RunInfo:
     seq_max: int
     n_sweeps: int
     rows: int | str = "?"
+    has_echem: bool = False
 
 
 @dataclass(frozen=True)

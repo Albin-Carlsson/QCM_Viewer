@@ -67,11 +67,17 @@ def empty(title: str):
 
 
 def series_labels(groups: list[int], orders: dict[int, int]) -> dict[int, str]:
-    """Legend label per group: use ``n=…`` when overtone orders are distinct."""
+    """Human-meaningful legend label per group.
+
+    Prefer the overtone order (``n = 3``) when the orders are distinct — that is
+    the canonical QCM identifier. When orders are absent/identical there is no
+    overtone information to show, so fall back to a 1-based ``Overtone i`` rather
+    than the internal channel index (never "group 0").
+    """
     ns = [orders.get(g, 1) for g in groups]
     if len(set(ns)) == len(ns) and any(n > 1 for n in ns):
-        return {g: f"n={orders.get(g, 1)}" for g in groups}
-    return {g: f"group {g}" for g in groups}
+        return {g: f"n = {orders.get(g, 1)}" for g in groups}
+    return {g: f"Overtone {i + 1}" for i, g in enumerate(groups)}
 
 
 def _xy(value_df: pl.DataFrame, group: int, max_points: int = MAX_PLOT_POINTS):
@@ -242,6 +248,60 @@ def baseline_span(x0: float, x1: float) -> hv.VSpan:
     return hv.VSpan(x0, x1).opts(color=BASELINE_COLOR, alpha=0.10)
 
 
+_CYCLE_BAND_COLOR = "#64748b"
+
+
+def cycle_band_elements(spans) -> list:
+    """Faint alternating bands + dotted boundaries marking each cycle on a time plot.
+
+    ``spans`` is a list of ``(cycle_number, x0_s, x1_s)``. Drawn in a neutral
+    slate so it reads as background structure, distinct from the colored
+    analysis-window / reference / saved-region overlays.
+    """
+    elements: list = []
+    for i, item in enumerate(spans):
+        try:
+            _cyc, x0, x1 = float(item[0]), float(item[1]), float(item[2])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if x1 <= x0:
+            continue
+        if i % 2 == 1:
+            elements.append(hv.VSpan(x0, x1).opts(color=_CYCLE_BAND_COLOR, alpha=0.07))
+        elements.append(hv.VLine(x0).opts(color=_CYCLE_BAND_COLOR, line_dash="dotted", line_width=0.8, alpha=0.6))
+    if spans:
+        try:
+            last = float(spans[-1][2])
+            elements.append(hv.VLine(last).opts(color=_CYCLE_BAND_COLOR, line_dash="dotted", line_width=0.8, alpha=0.6))
+        except (TypeError, ValueError, IndexError):
+            pass
+    return elements
+
+
+def _cycle_label_hook(spans):
+    """Draw a small ``C{n}`` marker at the top of each cycle band."""
+    def hook(plot, _element):
+        if not spans:
+            return
+        try:
+            from bokeh.models import Label
+
+            fig = plot.state
+            for item in spans:
+                try:
+                    cyc, x0, x1 = int(item[0]), float(item[1]), float(item[2])
+                except (TypeError, ValueError, IndexError):
+                    continue
+                fig.add_layout(Label(
+                    x=(x0 + x1) / 2, y=4, x_units="data", y_units="screen",
+                    text=f"C{cyc}", text_font_size="8pt", text_color=_CYCLE_BAND_COLOR,
+                    text_align="center", text_baseline="bottom", text_alpha=0.85,
+                ))
+        except Exception:
+            pass
+    return hook
+
+
 def window_elements(window: tuple[float, float] | None) -> list:
     """Shade the active analysis window (the 'current range') on a full-run plot.
 
@@ -351,11 +411,15 @@ def analysis_timeline(
     companion_df: pl.DataFrame | None = None,
     visible_groups: list[int] | None = None,
     companion_groups: list[int] | None = None,
+    companion_axis_label: str | None = None,
+    companion_prefix: str | None = None,
     baseline: tuple[float, float] | None = None,
     window: tuple[float, float] | None = None,
     annotation_spans: list | None = None,
     select_x: bool = False,
     height: int = PLOT_HEIGHT,
+    show_legend: bool = True,
+    cycle_spans: list | None = None,
 ):
     """Unified analysis plot: selected y-quantity vs selected x-axis.
 
@@ -372,7 +436,12 @@ def analysis_timeline(
     on_time = ax.is_time
     labels = series_labels(groups, orders)
     visible_groups = list(groups if visible_groups is None else visible_groups)
-    elements: list = list(window_elements(window)) if on_time else []
+    elements: list = []
+    if on_time and cycle_spans:
+        # Cycle bands sit behind everything else so curves/windows stay readable.
+        elements.extend(cycle_band_elements(cycle_spans))
+    if on_time:
+        elements.extend(window_elements(window))
     if on_time and baseline is not None:
         elements.append(baseline_span(*baseline))
 
@@ -402,7 +471,8 @@ def analysis_timeline(
 
     right_curves: list = []
     d_lo, d_hi = 0.0, 1.0
-    companion_label = "ΔD  [×10⁻⁶]"
+    companion_label = companion_axis_label or "ΔD  [×10⁻⁶]"
+    comp_prefix = companion_prefix or "ΔD"
     if companion_df is not None and not companion_df.is_empty():
         comp_groups = list(groups if companion_groups is None else companion_groups)
         d_vals = companion_df.filter(pl.col("group").is_in(comp_groups)).drop_nulls("value")["value"]
@@ -415,7 +485,7 @@ def analysis_timeline(
             if not len(x):
                 continue
             right_curves.append(
-                hv.Curve((x, y), ax.axis_label, companion_label, label=f"ΔD {labels[g]}").opts(
+                hv.Curve((x, y), ax.axis_label, companion_label, label=f"{comp_prefix} {labels[g]}").opts(
                     color=color_for_slot(slot), line_width=1.4, line_dash=[6, 4]
                 )
             )
@@ -436,12 +506,15 @@ def analysis_timeline(
         hooks.append(_vline_hover_hook)
     hooks.append(_legend_mute_hook)
     if on_time:
+        if cycle_spans:
+            hooks.append(_cycle_label_hook(cycle_spans))
         hooks.append(_saved_region_label_hook(annotation_spans or []))
         if select_x:
             hooks.append(_xbox_select_hook)
     return hv.Overlay(elements).opts(
         hv.opts.Overlay(
             title=title, height=height, responsive=True, legend_position="right",
+            show_legend=show_legend,
             active_tools=active, tools=tools, hooks=hooks, show_grid=True,
         ),
         hv.opts.Curve(tools=["hover"]),
@@ -593,6 +666,7 @@ def echem_curve(
     by_cycle: bool = True,
     monotonic: bool = False,
     height: int = PLOT_HEIGHT,
+    show_legend: bool = True,
 ):
     """One line plot of an electrochemistry waveform (one row per sweep).
 
@@ -646,6 +720,7 @@ def echem_curve(
     return hv.Overlay(curves).opts(
         hv.opts.Overlay(
             title=title, height=height, responsive=True, legend_position="right",
+            show_legend=show_legend,
             active_tools=["wheel_zoom"], tools=["hover", "box_zoom", "reset"],
             hooks=hooks, show_grid=True,
         ),

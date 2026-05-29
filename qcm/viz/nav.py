@@ -1,4 +1,10 @@
-"""Pure navigation and guidance logic for the stepper shell.
+"""Pure navigation and guidance logic for the workbench.
+
+The viewer is organized as three top-level *modes* — Data (explore &
+visualize), Results (mass/charge/MPE dashboard), and Report (export). The older
+six-step "focus" model is kept as ``STEPS`` plus its helpers so existing tests
+and the QC drawer keep working, but the shell now drives everything from
+``MODES``.
 
 No Panel imports: everything here is unit-testable plain Python.
 """
@@ -9,6 +15,38 @@ from dataclasses import dataclass
 _EPS = 1e-9
 
 
+# --------------------------------------------------------------------- modes
+@dataclass(frozen=True)
+class Mode:
+    id: str
+    label: str
+    sublabel: str
+    icon: str  # Tabler icon name (used by the sidebar buttons)
+
+
+MODES: tuple[Mode, ...] = (
+    Mode("data", "Data", "Explore & visualize", "chart-line"),
+    Mode("results", "Results", "Mass, charge, MPE", "chart-histogram"),
+    Mode("report", "Report", "Export & report", "file-text"),
+)
+
+
+def clamp_mode(index: int) -> int:
+    return max(0, min(len(MODES) - 1, int(index)))
+
+
+def mode_id(index: int) -> str:
+    return MODES[clamp_mode(index)].id
+
+
+def mode_index(mode_key: str) -> int:
+    for i, mode in enumerate(MODES):
+        if mode.id == mode_key:
+            return i
+    return 0
+
+
+# ------------------------------------------------------------- legacy steps
 @dataclass(frozen=True)
 class Step:
     id: str
@@ -55,6 +93,7 @@ def brush_target_for_step(step_key: str) -> str:
     return _BRUSH_BY_STEP.get(step_key, "current")
 
 
+# ----------------------------------------------------------------- guidance
 def needs_reference_hint(
     quantity_referenced: bool,
     baseline_s: tuple[float, float],

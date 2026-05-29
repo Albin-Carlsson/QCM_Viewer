@@ -12,9 +12,10 @@ from dataclasses import dataclass
 ACCENT = "#2563eb"
 HEADER_BG = "#0f172a"
 # Standardized plot sizing. Keep all plot dimensions here so pages stay consistent.
-HERO_HEIGHT = 440          # full-run QCM-D overview/reference plots; compact enough for one-screen pages
+HERO_HEIGHT = 380          # full-run QCM-D overview/reference plots; compact enough for one-screen pages
 PLOT_HEIGHT = 340           # main analysis timelines
 COMPACT_PLOT_HEIGHT = 220   # secondary/fingerprint plots
+RESULTS_PLOT_HEIGHT = 420   # the single headline plot on the Results page
 SWEEP_PANEL_HEIGHT = 260    # one raw sweep panel
 WATERFALL_PANEL_HEIGHT = 320
 

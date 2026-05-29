@@ -174,6 +174,29 @@ class QCMViewData:
             lambda: echem.waveform(self._timeline(cols, self.info.t0_us, self.info.t1_us, groups)),
         )
 
+    def cycle_spans(self) -> list[tuple[int, float, float]]:
+        """Per-cycle ``(cycle_number, t0_s, t1_s)`` windows in elapsed seconds.
+
+        Cycles are contiguous in time, so each maps to one [start, end] span. Used
+        to overlay cycle boundaries on the time-axis plots. Cheap (one row per
+        sweep) and cached with the echem waveform query.
+        """
+        wf = self.echem_waveform()
+        if wf.is_empty() or "cycle" not in wf.columns or "timestamp" not in wf.columns:
+            return []
+        agg = (
+            wf.drop_nulls("cycle")
+            .group_by("cycle")
+            .agg([pl.col("timestamp").min().alias("t0"), pl.col("timestamp").max().alias("t1")])
+            .sort("cycle")
+        )
+        spans: list[tuple[int, float, float]] = []
+        for row in agg.iter_rows(named=True):
+            x0 = (row["t0"] - self.info.t0_us) / _US
+            x1 = (row["t1"] - self.info.t0_us) / _US
+            spans.append((int(row["cycle"]), float(x0), float(x1)))
+        return spans
+
     def waterfall_df(self, state: ViewState) -> pl.DataFrame:
         t0, t1 = state.t_us(self.info.t0_us)
         f0, f1 = state.frequency_band
