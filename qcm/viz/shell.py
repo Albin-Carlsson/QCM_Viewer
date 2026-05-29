@@ -13,7 +13,7 @@ import panel as pn
 
 from . import nav
 from .actions import ViewerActions
-from .components import pill, section_title
+from .components import section_title
 from .controls import ViewerControls
 from .data import QCMViewData
 from .design import APP_CSS
@@ -58,12 +58,26 @@ class ViewerShell:
         # place in the layout tree; rebuilding these on every view() call would
         # mount them in both the persistent shell and the QC drawer simultaneously.
         self._cached_context_bar = self._build_context_bar()
+        self._cached_right_stats = self.live_stats()
+        self._cached_phase_inline_table = pn.bind(
+            lambda *_: self._steps["phases"].phases_table(),
+            self.controls.annotation_version,
+        )
+        self._sync_stats_placement(self.focus.value)
         self._cached_selection_bar = self._build_selection_bar()
         self._cached_drawer = self._build_drawer()
 
     # -- reactions --------------------------------------------------------
     def _on_focus_change(self, event) -> None:
         self.controls.brush_mode.value = nav.brush_target_for_step(nav.step_id(int(event.new)))
+        self._sync_stats_placement(event.new)
+
+    def _sync_stats_placement(self, active: int) -> None:
+        if not hasattr(self, "_cached_right_stats") or not hasattr(self, "_cached_phase_inline_table"):
+            return
+        in_phases = nav.step_id(int(active)) == "phases"
+        self._cached_right_stats.visible = not in_phases
+        self._cached_phase_inline_table.visible = in_phases
 
     def _go(self, index: int):
         def handler(_event=None):
@@ -83,18 +97,20 @@ class ViewerShell:
     def _build_context_bar(self):
         inspect = pn.widgets.Button(name="Inspect raw sweeps", button_type="default", icon="microscope")
         inspect.on_click(self._open_drawer)
-        meta = pill("Duration", f"{self.info.span_s:,.0f} s") + pill("Channels", str(len(self.info.groups)))
-        readout = pn.bind(self.controls.zero_reference_summary,
-                          self.controls.t_range, self.controls.baseline_range)
+        info = pn.pane.HTML(
+            "<div class='qcm-runline'>"
+            f"<span class='run'>{escape(str(self.info.run_id))}</span>"
+            f"<span class='meta'>Duration: {self.info.span_s:,.0f} s</span>"
+            f"<span class='meta'>Channels: {len(self.info.groups)}</span>"
+            "</div>",
+            margin=0,
+        )
         return pn.Row(
-            pn.pane.HTML(f"<div class='qcm-run-id'>{escape(str(self.info.run_id))}</div>", margin=0),
-            pn.pane.HTML(meta, margin=0),
-            self.controls.compact_channel_controls(),
+            info,
             pn.layout.HSpacer(),
-            readout,
+            self.controls.compact_channel_controls(),
             inspect,
             self.controls.save_state_button,
-            self.controls.status,
             margin=0, sizing_mode="stretch_width", css_classes=["qcm-context-bar"],
         )
 
@@ -140,11 +156,11 @@ class ViewerShell:
             pn.bind(self.controls.draw_mode_status, self.controls.brush_mode),
             pn.Row(self.controls.plot_reset_button(),
                    margin=0, sizing_mode="stretch_width", css_classes=["range-actions"]),
-            margin=0, sizing_mode="stretch_width",
+            self._cached_phase_inline_table,
+            margin=0, sizing_mode="stretch_width", css_classes=["qcm-selection-tools"],
         )
         return pn.Row(
-            self.controls.current_range_compact(),
-            self.controls.zero_reference_controls(),
+            self.controls.active_range_editor(quantity_key=self.controls.quantity_select),
             tools,
             margin=0, sizing_mode="stretch_width", css_classes=["qcm-selection-bar"],
         )
@@ -163,6 +179,16 @@ class ViewerShell:
     def secondary(self):
         def render(active):
             return self._active_step(active).secondary_panel()
+        return pn.bind(render, self.focus)
+
+    def below_plot(self):
+        """Wide, focus-specific analysis area beneath the anchor plot.
+
+        Heavy tables/fingerprints live here (full width) instead of the narrow
+        right rail, so e.g. Quantify's statistics do not run far off the bottom.
+        """
+        def render(active):
+            return self._active_step(active).below_plot_panel()
         return pn.bind(render, self.focus)
 
     def _build_drawer(self):
@@ -193,10 +219,11 @@ class ViewerShell:
             pn.Card(self.anchor(), hide_header=True, margin=0,
                     sizing_mode="stretch_width", css_classes=["qcm-anchor"]),
             self.selection_bar(),
+            self.below_plot(),
             margin=0, sizing_mode="stretch_width", css_classes=["qcm-plotzone"],
         )
         rightzone = pn.Column(
-            self.live_stats(), self.secondary(),
+            self._cached_right_stats, self.secondary(),
             margin=0, sizing_mode="stretch_width", css_classes=["qcm-rightzone"],
         )
         body = pn.Row(

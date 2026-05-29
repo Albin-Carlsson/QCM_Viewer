@@ -10,7 +10,7 @@ import polars as pl
 
 from .. import plots
 from .. import science  # noqa: F401  (kept for parity; used by subclasses)
-from ..theme import HERO_HEIGHT
+from ..theme import HERO_HEIGHT, quantity
 from ..actions import ViewerActions
 from ..components import empty_state
 from ..controls import ViewerControls
@@ -60,6 +60,11 @@ class BaseStep:
     @staticmethod
     def empty_state(text: str):
         return empty_state(text)
+
+    def below_plot_panel(self):
+        """Wide analysis area beneath the anchor plot. Empty by default; focuses
+        with heavy tables/fingerprints (Quantify, Phases) override this."""
+        return pn.Spacer(height=0)
 
     @staticmethod
     def _nearest_hover_hook(plot, _element):
@@ -272,23 +277,37 @@ class BaseStep:
         return f"{value:,.{digits}f}{suffix}"
 
     def overview_anchor(self, window: str = "current"):
-        """Full-run dual-axis QCM-D plot used as the anchor for Overview,
+        """Full-run selected-quantity plot used as the anchor for Overview,
         Reference, and Report. ``window`` selects which range is highlighted."""
         try:
             state = self.controls.state()
             full = replace(state, t_range_s=(0.0, float(self.data.info.span_s)))
-            norm_df, d_df = self.data.qcmd_frames(full)
-            win = state.t_range_s if window == "current" else state.baseline_s
-            plot = plots.dual_axis_qcmd(
-                norm_df, d_df, full.groups, full.orders, "QCM-D overview",
-                baseline=state.baseline_s,
+            value_df, elapsed = self.data.value_df(full)
+            q = quantity(full.quantity)
+            if window == "reference":
+                win = state.baseline_s
+            elif window == "mark":
+                win = tuple(float(v) for v in self.controls.mark_range.value)
+            else:
+                win = state.t_range_s
+            baseline = state.baseline_s if q.referenced and window != "reference" else None
+            title = f"{q.label} overview · {value_df.height:,} points · {elapsed:.0f} ms"
+            plot = plots.timeline(
+                value_df,
+                q,
+                full.groups,
+                full.orders,
+                title,
                 annotation_spans=self.data.annotation_spans(state),
-                window=win, select_x=True, height=HERO_HEIGHT,
+                baseline=baseline,
+                window=win,
+                select_x=True,
+                height=HERO_HEIGHT,
             )
-            plot = self.with_phase_labels(plot, norm_df, height=HERO_HEIGHT)
+            plot = self.with_phase_labels(plot, value_df, height=HERO_HEIGHT)
             return self.interactive_plot(self.force_plot_height(plot, HERO_HEIGHT))
         except Exception as exc:  # pragma: no cover
-            return pn.pane.Alert(f"QCM-D plot failed: {exc}", alert_type="danger")
+            return pn.pane.Alert(f"Overview plot failed: {exc}", alert_type="danger")
 
     def current_range_summary_cards(self):
         try:

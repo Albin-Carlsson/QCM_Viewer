@@ -146,23 +146,20 @@ class PhasesStep(BaseStep):
         return self.phase_plot()
 
     def secondary_panel(self):
-        mark_editor = pn.Card(
-            self.controls.mark_range,
-            self.controls._number_row("mark"),
-            pn.Row(self.controls.mark_full_range_button, margin=0,
-                   sizing_mode="stretch_width", css_classes=["range-actions"]),
-            self.controls.phase_mark_controls(include_card=False),
-            title="Mark range", collapsible=False, margin=0,
-            sizing_mode="stretch_width",
-            css_classes=["plot-controls", "range-editor-card", "mark-range-card"],
-        )
         return pn.Column(
             hint("Mark injections, rinses, equilibrations, or artifacts. Saved "
                  "phases can be analyzed in Quantify and included in exports.", tone="info"),
-            mark_editor,
-            pn.bind(lambda *_: self.phases_table(), self.controls.annotation_version),
-            self.panel(self.phase_rollup, *self.controls.explore_inputs, title="Phase rollup"),
-            self.panel(self.phase_response_ranking, *self.controls.explore_inputs, title="Response ranking"),
-            self.panel(self.phase_matrix, *self.controls.explore_inputs, title="Per-channel matrix"),
             margin=0, sizing_mode="stretch_width", css_classes=["qcm-secondary"],
+        )
+
+    def below_plot_panel(self):
+        # Wide comparison tables live full-width beneath the plot.
+        return pn.Column(
+            pn.Row(
+                self.panel(self.phase_rollup, *self.controls.explore_inputs, title="Phase rollup"),
+                self.panel(self.phase_response_ranking, *self.controls.explore_inputs, title="Response ranking"),
+                margin=0, sizing_mode="stretch_width",
+            ),
+            self.panel(self.phase_matrix, *self.controls.explore_inputs, title="Per-channel matrix"),
+            margin=0, sizing_mode="stretch_width", css_classes=["qcm-below-plot"],
         )

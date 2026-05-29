@@ -188,13 +188,22 @@ class QuantifyStep(BaseStep):
                     self.controls.analysis_region_select, self.controls.annotation_version),
             margin=0, sizing_mode="stretch_width", css_classes=["analysis-target-stack"],
         )
-        stats = pn.Column(
+        return pn.Column(hint_block, target, margin=0,
+                         sizing_mode="stretch_width", css_classes=["qcm-secondary"])
+
+    def below_plot_panel(self):
+        # Heavy statistics live full-width beneath the plot, not in the narrow
+        # right rail, so they stay legible and do not run off the bottom.
+        left = pn.Column(
             self.panel(self.summary_stats_table, *self.controls.explore_inputs, title="Statistics"),
             self.panel(self.region_readout, *self.controls.explore_inputs, title="Per-channel readout"),
+            margin=0, sizing_mode="stretch_width",
+        )
+        right = pn.Column(
             self.panel(self.df_plot, *self.controls.explore_inputs,
                        self.controls.plot_reset_version, title="ΔD vs Δf/n"),
             self.panel(self.full_stats_table, *self.controls.explore_inputs, title="Advanced statistics"),
             margin=0, sizing_mode="stretch_width",
         )
-        return pn.Column(hint_block, target, stats, margin=0,
-                         sizing_mode="stretch_width", css_classes=["qcm-secondary"])
+        return pn.Row(left, right, margin=0, sizing_mode="stretch_width",
+                      css_classes=["qcm-below-plot"])

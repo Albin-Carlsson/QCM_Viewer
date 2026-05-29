@@ -295,7 +295,7 @@ class ViewerControls:
         self.quantity_select = pn.widgets.Select(
             name="Quantity",
             options=_QUANTITY_OPTIONS,
-            value=self.saved.get("quantity", "sauerbrey_mass"),
+            value=self.saved.get("quantity", "delta_f_norm"),
             sizing_mode="stretch_width",
             css_classes=["compact-select", "quantity-select"],
         )
@@ -429,15 +429,16 @@ class ViewerControls:
         # Range sliders trigger on ``value_throttled`` so dragging fires a single
         # query on release instead of one per mouse-move.  Numeric inputs are
         # included so precise edits also trigger bound plots/tables immediately.
+        # Only the throttled sliders drive reactive rebuilds. The numeric inputs
+        # sync into the sliders (``_sync_slider_from_input`` sets ``t_range.value``),
+        # so a typed edit still updates plots/stats via the slider — but they are
+        # intentionally NOT separate triggers, otherwise one slider drag fires up
+        # to three full rebuilds (slider + both synced number boxes) and feels laggy.
         return (
             self.group_select,
             self.orders_text,
             self.t_range.param.value_throttled,
-            self.t_range_start,
-            self.t_range_end,
             self.baseline_range.param.value_throttled,
-            self.baseline_start,
-            self.baseline_end,
             self.annotation_version,
             self.analysis_region_select,
         )
@@ -821,14 +822,6 @@ class ViewerControls:
             pn.bind(self.zero_reference_readout, self.t_range, self.baseline_range),
             self.baseline_range,
             self._number_row("reference"),
-            pn.Row(
-                self.use_selection_as_baseline,
-                self.revert_baseline,
-                self.baseline_full_range_button,
-                margin=0,
-                sizing_mode="stretch_width",
-                css_classes=["range-actions"],
-            ),
             title="Reference range",
             collapsible=False,
             collapsed=False,
@@ -905,19 +898,8 @@ class ViewerControls:
         include_save: bool = False,
     ):
         def _view(mode: str, qkey: str | None = None):
-            key = qkey or self.quantity_select.value
             if mode == "reference":
-                if quantity(key).referenced:
-                    return self.zero_reference_controls()
-                return pn.Card(
-                    pn.pane.Markdown("<small>Reference is not used for this raw/absolute quantity.</small>", margin=0),
-                    title="Reference range",
-                    collapsible=True,
-                    collapsed=False,
-                    margin=0,
-                    sizing_mode="stretch_width",
-                    css_classes=["plot-controls", "range-editor-card", "reference-range-card", "is-disabled"],
-                )
+                return self.zero_reference_controls()
             if mode == "mark":
                 return self.mark_range_controls()
             return self.current_range_controls(include_save=include_save)
@@ -941,6 +923,32 @@ class ViewerControls:
             margin=0,
             sizing_mode="stretch_width",
             css_classes=["plot-controls", "paired-ranges", extra_class],
+        )
+
+    def active_range_editor(
+        self,
+        *,
+        quantity_key: str | None = None,
+        include_save: bool = False,
+    ):
+        """The single range editor selected by the draw-target control."""
+        def _view(mode: str, qkey: str | None = None):
+            if mode == "reference":
+                return self.zero_reference_controls()
+            if mode == "mark":
+                return self.mark_range_controls()
+            return self.current_range_controls(include_save=include_save)
+
+        if quantity_key is not None:
+            editor = pn.bind(_view, self.brush_mode, quantity_key)
+        else:
+            editor = pn.bind(_view, self.brush_mode)
+        return pn.Column(
+            editor,
+            self.range_status,
+            margin=0,
+            sizing_mode="stretch_width",
+            css_classes=["plot-controls", "active-range-editor"],
         )
 
     def paired_range_controls(

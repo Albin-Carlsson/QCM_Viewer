@@ -77,7 +77,11 @@ html, body {
 .bk-card-body { padding: var(--qcm-space-3); }
 
 .qcm-selection-bar { display: flex; gap: var(--qcm-space-3); align-items: flex-start; flex-wrap: wrap; }
-.qcm-selection-bar > * { flex: 1 1 280px; min-width: 0; }
+.qcm-selection-bar > * { min-width: 0; }
+.qcm-selection-bar > .active-range-editor { flex: 2 1 600px; }
+.qcm-selection-bar > :not(.active-range-editor) { flex: 1 1 300px; }
+.qcm-selection-tools { display: flex; flex-direction: column; gap: var(--qcm-space-2); }
+.qcm-selection-tools .qcm-stats { margin-top: var(--qcm-space-1); }
 
 .qcm-stats { display: flex; flex-direction: column; gap: var(--qcm-space-2);
   border: 1px solid var(--qcm-border); border-radius: var(--qcm-radius-md);
@@ -116,6 +120,25 @@ html, body {
   z-index: 50; overflow-y: auto; background: var(--qcm-surface);
   border-left: 1px solid var(--qcm-border); box-shadow: var(--qcm-shadow-2); padding: var(--qcm-space-4); }
 .qcm-drawer-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--qcm-space-3); }
+
+/* Context bar: one coherent line of run info + uniform top-shelf controls --- */
+.qcm-runline { display: flex; gap: var(--qcm-space-4); align-items: baseline; flex-wrap: wrap; font-size: 0.86rem; color: var(--qcm-muted); }
+.qcm-runline .run { font-size: 1.05rem; font-weight: 800; color: var(--qcm-text); }
+.qcm-runline .meta { font-variant-numeric: tabular-nums; }
+.qcm-context-bar .bk-btn { min-height: 34px; }
+.qcm-context-bar .channel-controls { max-width: 240px; }
+.qcm-context-bar .channel-controls .bk-card-header { min-height: 34px; }
+
+/* Range editors: give the slider track + handles vertical room so the
+   Analysis / Reference / Mark sliders never overlap their labels or each other. */
+.qcm-selection-bar > * { min-width: 260px; }
+.range-editor-card .bk-card-body { display: flex; flex-direction: column; gap: var(--qcm-space-2); }
+.range-editor-card .noUi-target, .range-editor-card .bk-slider { margin: 10px 6px 14px 6px; }
+.mark-range-card .noUi-target, .mark-range-card .bk-slider { margin: 10px 6px 14px 6px; }
+
+/* Wide analysis area beneath the anchor plot (Quantify stats, Phase tables). */
+.qcm-below-plot { display: flex; gap: var(--qcm-space-3); align-items: flex-start; flex-wrap: wrap; }
+.qcm-below-plot > * { flex: 1 1 360px; min-width: 0; }
 
 /* Keep any stray dark-mode toggles hidden (defensive, third-party). */
 button[title*="theme" i], button[aria-label*="theme" i], .theme-toggle, .pn-theme-toggle { display: none !important; }
