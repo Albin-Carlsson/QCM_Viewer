@@ -7,6 +7,8 @@ transient UI state held here.
 """
 from __future__ import annotations
 
+from html import escape
+
 import panel as pn
 
 from . import nav
@@ -51,6 +53,14 @@ class ViewerShell:
         self.focus.param.watch(self._on_focus_change, "value")
         self.controls.brush_mode.value = nav.brush_target_for_step("review")
 
+        # Build once so each call to view() reuses the same Panel objects.
+        # Widget singletons (t_range, group_select, etc.) can live in only one
+        # place in the layout tree; rebuilding these on every view() call would
+        # mount them in both the persistent shell and the QC drawer simultaneously.
+        self._cached_context_bar = self._build_context_bar()
+        self._cached_selection_bar = self._build_selection_bar()
+        self._cached_drawer = self._build_drawer()
+
     # -- reactions --------------------------------------------------------
     def _on_focus_change(self, event) -> None:
         self.controls.brush_mode.value = nav.brush_target_for_step(nav.step_id(int(event.new)))
@@ -70,14 +80,14 @@ class ViewerShell:
         return self._steps[nav.step_id(int(active))]
 
     # -- persistent regions ----------------------------------------------
-    def context_bar(self):
+    def _build_context_bar(self):
         inspect = pn.widgets.Button(name="Inspect raw sweeps", button_type="default", icon="microscope")
         inspect.on_click(self._open_drawer)
         meta = pill("Duration", f"{self.info.span_s:,.0f} s") + pill("Channels", str(len(self.info.groups)))
         readout = pn.bind(self.controls.zero_reference_summary,
                           self.controls.t_range, self.controls.baseline_range)
         return pn.Row(
-            pn.pane.HTML(f"<div class='qcm-run-id'>{self.info.run_id}</div>", margin=0),
+            pn.pane.HTML(f"<div class='qcm-run-id'>{escape(str(self.info.run_id))}</div>", margin=0),
             pn.pane.HTML(meta, margin=0),
             self.controls.compact_channel_controls(),
             pn.layout.HSpacer(),
@@ -87,6 +97,9 @@ class ViewerShell:
             self.controls.status,
             margin=0, sizing_mode="stretch_width", css_classes=["qcm-context-bar"],
         )
+
+    def context_bar(self):
+        return self._cached_context_bar
 
     def focus_rail(self):
         def render(active: int):
@@ -113,17 +126,19 @@ class ViewerShell:
             render, self.focus,
             *self.controls.explore_inputs,
             self.controls.mark_range.param.value_throttled,
+            self.controls.mark_start,
+            self.controls.mark_end,
             self.controls.analysis_region_select,
             self.controls.annotation_version,
             self.controls.plot_reset_version,
         )
 
-    def selection_bar(self):
+    def _build_selection_bar(self):
         tools = pn.Column(
             self.controls.quantity_select,
             self.controls.brush_mode,
             pn.bind(self.controls.draw_mode_status, self.controls.brush_mode),
-            pn.Row(self.controls.plot_reset_button(), self.controls.use_selection_as_baseline,
+            pn.Row(self.controls.plot_reset_button(),
                    margin=0, sizing_mode="stretch_width", css_classes=["range-actions"]),
             margin=0, sizing_mode="stretch_width",
         )
@@ -133,6 +148,9 @@ class ViewerShell:
             tools,
             margin=0, sizing_mode="stretch_width", css_classes=["qcm-selection-bar"],
         )
+
+    def selection_bar(self):
+        return self._cached_selection_bar
 
     def live_stats(self):
         body = pn.bind(lambda *_: self._steps["review"].current_range_summary_cards(),
@@ -147,18 +165,28 @@ class ViewerShell:
             return self._active_step(active).secondary_panel()
         return pn.bind(render, self.focus)
 
-    def drawer(self):
+    def _build_drawer(self):
         close = pn.widgets.Button(name="Close ✕", button_type="default")
         close.on_click(self._close_drawer)
+        # Use pn.bind so the QC view is a ParamFunction in the layout tree rather
+        # than a concrete Column whose .objects the double-mount walker descends
+        # into. The QC drawer shares persistent widget singletons (t_range,
+        # group_select, …) with the selection bar and context bar; embedding it as
+        # a live object would put those singletons in two places simultaneously.
+        qc_content = pn.bind(lambda _open: self._qc.view() if _open else pn.Spacer(height=0),
+                             self.drawer_open)
         panel = pn.Column(
             pn.Row(pn.pane.HTML("<b>Raw sweep / QC inspection</b>", margin=0),
                    pn.layout.HSpacer(), close, margin=0, sizing_mode="stretch_width",
                    css_classes=["qcm-drawer-header"]),
-            self._qc.view(),
+            qc_content,
             margin=0, sizing_mode="stretch_width", css_classes=["qcm-drawer"], visible=False,
         )
         self.drawer_open.link(panel, value="visible")
         return panel
+
+    def drawer(self):
+        return self._cached_drawer
 
     def view(self):
         plotzone = pn.Column(

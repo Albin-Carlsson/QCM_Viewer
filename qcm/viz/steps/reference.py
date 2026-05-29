@@ -17,7 +17,5 @@ class ReferenceStep(BaseStep):
                  "Drag on the plot (brush targets the reference range here).", tone="info"),
             pn.bind(self.controls.zero_reference_readout,
                     self.controls.t_range, self.controls.baseline_range),
-            pn.Row(self.controls.revert_baseline, self.controls.baseline_full_range_button,
-                   margin=0, sizing_mode="stretch_width", css_classes=["range-actions"]),
             margin=0, sizing_mode="stretch_width", css_classes=["qcm-secondary"],
         )
