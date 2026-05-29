@@ -142,49 +142,31 @@ class PhasesStep(BaseStep):
         except Exception as exc:  # pragma: no cover
             return pn.pane.Alert(f"Phase ranking failed: {exc}", alert_type="danger")
 
-    def compact_phase_controls(self):
-        # Saved phases used to sit in a narrow right column, which made the
-        # table feel detached from the phase-marking workflow. Keep everything
-        # left-to-right and then place the saved-phase table directly below the
-        # mark controls so the reading order is: tools -> mark -> saved phases.
-        return pn.Column(
-            self.controls.plot_tools_row(include_quantity=True),
-            self.controls.mark_range_controls(),
-            pn.bind(lambda *_: self.phases_table(), self.controls.annotation_version),
-            margin=0,
+    def anchor_plot(self):
+        return self.phase_plot()
+
+    def secondary_panel(self):
+        mark_editor = pn.Card(
+            self.controls.mark_range,
+            self.controls._number_row("mark"),
+            pn.Row(self.controls.mark_full_range_button, margin=0,
+                   sizing_mode="stretch_width", css_classes=["range-actions"]),
+            self.controls.phase_mark_controls(include_card=False),
+            title="Mark range", collapsible=False, margin=0,
             sizing_mode="stretch_width",
-            css_classes=["phase-control-stack", "phase-controls-saved", "compact-panel"],
+            css_classes=["plot-controls", "range-editor-card", "mark-range-card"],
+        )
+        return pn.Column(
+            hint("Mark injections, rinses, equilibrations, or artifacts. Saved "
+                 "phases can be analyzed in Quantify and included in exports.", tone="info"),
+            mark_editor,
+            pn.bind(lambda *_: self.phases_table(), self.controls.annotation_version),
+            self.panel(self.phase_rollup, *self.controls.explore_inputs, title="Phase rollup"),
+            self.panel(self.phase_response_ranking, *self.controls.explore_inputs, title="Response ranking"),
+            self.panel(self.phase_matrix, *self.controls.explore_inputs, title="Per-channel matrix"),
+            margin=0, sizing_mode="stretch_width", css_classes=["qcm-secondary"],
         )
 
     def view(self):
-        guidance = hint(
-            "Mark important experimental regions such as injections, rinses, equilibrations, or artifacts. Saved phases can later be analyzed individually in Quantify and included in reports/exported notebooks.",
-            tone="info",
-        )
-        lower = pn.Row(
-            self.panel(self.phase_rollup, *self.controls.explore_inputs, title="Phase rollup", collapsible=False),
-            self.panel(self.phase_response_ranking, *self.controls.explore_inputs, title="Response ranking", collapsible=False),
-            margin=0,
-            sizing_mode="stretch_width",
-            css_classes=["compact-two-column", "phase-analysis-row"],
-        )
-        return pn.Column( guidance,
-            self.panel(
-                self.phase_plot,
-                *self.controls.explore_inputs,
-                self.controls.mark_range.param.value_throttled,
-                self.controls.mark_start,
-                self.controls.mark_end,
-                self.controls.annotation_version,
-                self.controls.plot_reset_version,
-                title="Phase marking plot",
-                controls=self.compact_phase_controls(),
-                controls_position="bottom",
-                collapsible=False,
-            ),
-            lower,
-            self.panel(self.phase_matrix, *self.controls.explore_inputs, title="Per-channel phase matrix", collapsible=False),
-            margin=0,
-            sizing_mode="stretch_width",
-            css_classes=["workbench-page", "viewer-page", "phases-page"],
-        )
+        return pn.Column(self.anchor_plot(), self.secondary_panel(),
+                         margin=0, sizing_mode="stretch_width")

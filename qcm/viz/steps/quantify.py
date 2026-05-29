@@ -147,18 +147,6 @@ class QuantifyStep(BaseStep):
         except Exception as exc:  # pragma: no cover
             return pn.pane.Alert(f"Advanced stats failed: {exc}", alert_type="danger")
 
-    def stats_view(self):
-        # Kept for compatibility with older page code. The current layout renders
-        # summary and advanced statistics as separate compact panels so the
-        # reading order is: per-channel readout -> statistics -> advanced stats.
-        return pn.Column(
-            pn.bind(lambda *_: self.summary_stats_table(), *self.controls.explore_inputs),
-            pn.bind(lambda *_: self.full_stats_table(), *self.controls.explore_inputs),
-            margin=0,
-            sizing_mode="stretch_width",
-            css_classes=["stacked-stats"],
-        )
-
     def region_readout(self):
         try:
             state = self.target_state()
@@ -177,21 +165,6 @@ class QuantifyStep(BaseStep):
         except Exception as exc:  # pragma: no cover
             return pn.pane.Alert(f"Fingerprint plot failed: {exc}", alert_type="danger")
 
-    def controls_for_quantity(self):
-        target_summary = pn.bind(
-            lambda *_: self.selected_target_summary_table(),
-            *self.controls.explore_inputs,
-            self.controls.analysis_region_select,
-            self.controls.annotation_version,
-        )
-        return pn.Column(
-            self.controls.plot_tools_row(include_quantity=True),
-            self.controls.analysis_region_controls(summary=target_summary),
-            margin=0,
-            sizing_mode="stretch_width",
-            css_classes=["quantify-control-stack", "quantify-controls-summary", "compact-panel"],
-        )
-
     def _reference_hint(self):
         state = self.controls.state()
         q = quantity(state.quantity)
@@ -203,41 +176,29 @@ class QuantifyStep(BaseStep):
             )
         return pn.Spacer(height=0)
 
-    def view(self):
+    def anchor_plot(self):
+        return self.quantity_plot()
+
+    def secondary_panel(self):
         hint_block = pn.bind(lambda *_: self._reference_hint(), *self.controls.explore_inputs)
-
-        main_timeline = self.panel(
-            self.quantity_plot,
-            *self.controls.explore_inputs,
+        target = pn.Column(
             self.controls.analysis_region_select,
-            self.controls.annotation_version,
-            self.controls.plot_reset_version,
-            title="Selected quantity",
-            controls=self.controls_for_quantity(),
-            controls_position="bottom",
-            collapsible=False,
+            pn.bind(lambda *_: self.selected_target_summary_table(),
+                    *self.controls.explore_inputs,
+                    self.controls.analysis_region_select, self.controls.annotation_version),
+            margin=0, sizing_mode="stretch_width", css_classes=["analysis-target-stack"],
         )
+        stats = pn.Column(
+            self.panel(self.summary_stats_table, *self.controls.explore_inputs, title="Statistics"),
+            self.panel(self.region_readout, *self.controls.explore_inputs, title="Per-channel readout"),
+            self.panel(self.df_plot, *self.controls.explore_inputs,
+                       self.controls.plot_reset_version, title="ΔD vs Δf/n"),
+            self.panel(self.full_stats_table, *self.controls.explore_inputs, title="Advanced statistics"),
+            margin=0, sizing_mode="stretch_width",
+        )
+        return pn.Column(hint_block, target, stats, margin=0,
+                         sizing_mode="stretch_width", css_classes=["qcm-secondary"])
 
-        lower = pn.Row(
-            self.panel(self.df_plot, *self.controls.explore_inputs, self.controls.plot_reset_version, title="ΔD vs Δf/n", collapsible=False),
-            pn.Column(
-                self.panel(self.region_readout, *self.controls.explore_inputs, title="Per-channel readout", collapsible=False),
-                self.panel(self.summary_stats_table, *self.controls.explore_inputs, title="Statistics", collapsible=False),
-                self.panel(self.full_stats_table, *self.controls.explore_inputs, title="Advanced statistics", collapsible=False),
-                margin=0,
-                sizing_mode="stretch_width",
-                css_classes=["readout-stats-stack"],
-            ),
-            margin=0,
-            sizing_mode="stretch_width",
-            css_classes=["compact-two-column", "quantify-lower-row"],
-        )
-
-        return pn.Column(
-            hint_block,
-            main_timeline,
-            lower,
-            margin=0,
-            sizing_mode="stretch_width",
-            css_classes=["workbench-page", "viewer-page", "quantify-page"],
-        )
+    def view(self):
+        return pn.Column(self.anchor_plot(), self.secondary_panel(),
+                         margin=0, sizing_mode="stretch_width")

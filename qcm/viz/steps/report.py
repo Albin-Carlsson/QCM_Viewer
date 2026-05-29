@@ -1,4 +1,4 @@
-"""Report step: summary and exports."""
+"""Report focus: overview anchor + export controls."""
 from __future__ import annotations
 
 import panel as pn
@@ -7,24 +7,18 @@ from ._base import BaseStep
 
 
 class ReportStep(BaseStep):
-    """Simple report/export surface using existing export capabilities."""
+    def anchor_plot(self):
+        return self.overview_anchor("current")
+
+    def secondary_panel(self):
+        return pn.Card(
+            self.controls.marker_select,
+            self.actions.export_data_dl,
+            self.actions.export_nb_dl,
+            title="Export", collapsible=False, margin=0,
+            sizing_mode="stretch_width", css_classes=["qcm-secondary"],
+        )
 
     def view(self):
-        return pn.Column(
-            self.panel(self.current_range_summary_cards, *self.controls.explore_inputs, title="Summary"),
-            pn.Card(
-                self.controls.marker_select,
-                self.actions.export_data_dl,
-                self.actions.export_nb_dl,
-                self.controls.save_state_button,
-                self.controls.status,
-                title="Export",
-                collapsible=True,
-                collapsed=False,
-                margin=0,
-                sizing_mode="stretch_width",
-            ),
-            margin=0,
-            sizing_mode="stretch_width",
-            css_classes=["workbench-page", "viewer-page"],
-        )
+        return pn.Column(self.anchor_plot(), self.secondary_panel(),
+                         margin=0, sizing_mode="stretch_width")
