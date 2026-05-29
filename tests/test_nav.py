@@ -43,3 +43,9 @@ def test_reference_hint_only_when_referenced_and_unset():
     # Compares against span_s, not a hardcoded value: full-span at a different span.
     assert nav.needs_reference_hint(True, (0.0, 200.0), 200.0) is True
     assert nav.needs_reference_hint(True, (0.0, 100.0), 200.0) is False
+
+
+def test_focus_labels_use_overview_first():
+    assert [s.label for s in nav.STEPS] == [
+        "Overview", "Reference", "Phases", "Quantify", "Report",
+    ]

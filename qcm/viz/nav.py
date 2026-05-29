@@ -16,7 +16,7 @@ class Step:
 
 
 STEPS: tuple[Step, ...] = (
-    Step("review", "Review"),
+    Step("review", "Overview"),
     Step("reference", "Reference"),
     Step("phases", "Phases"),
     Step("quantify", "Quantify"),
