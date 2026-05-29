@@ -5,10 +5,6 @@ Behavior stays in controls/actions/data/pages.
 """
 from __future__ import annotations
 
-from html import escape
-
-import panel as pn
-
 
 APP_CSS = """
 :root {
@@ -432,62 +428,6 @@ button[aria-label*="theme" i],
 }
 .qcm-drawer-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--qcm-space-3); }
 """
-
-
-def _html(markup: str, *, css_classes: list[str] | None = None) -> pn.pane.HTML:
-    return pn.pane.HTML(markup, margin=0, sizing_mode="stretch_width", css_classes=css_classes or [])
-
-
-def section_header(title: str, _subtitle: str | None = None, copy: str | None = None) -> pn.pane.HTML:
-    """Minimal page header.  The UI should be self-explanatory, so no subtitle copy."""
-    return _html(
-        "<div class='workbench-section page-title-section'>"
-        f"<h2>{escape(title)}</h2>"
-        "</div>"
-    )
-
-
-def metric_card(label: str, value: str, caption: str = "", *, tone: str = "neutral") -> pn.pane.HTML:
-    safe_tone = tone if tone in {"accent", "success", "warning", "danger", "neutral"} else "neutral"
-    caption_markup = f"<p class='metric-caption'>{escape(caption)}</p>" if caption else ""
-    return _html(
-        f"<div class='metric-card {safe_tone}'>"
-        f"<div class='metric-label'>{escape(label)}</div>"
-        f"<div class='metric-value'>{escape(value)}</div>"
-        f"{caption_markup}"
-        "</div>"
-    )
-
-
-def metric_table(rows: list[tuple[str, str, str]]) -> pn.pane.HTML:
-    body = "".join(
-        "<tr>"
-        f"<td class='kpi-label'>{escape(label)}</td>"
-        f"<td class='kpi-value'>{escape(value)}</td>"
-        f"<td class='kpi-detail'>{escape(detail)}</td>"
-        "</tr>"
-        for label, value, detail in rows
-    )
-    return _html(
-        "<div class='kpi-table-wrap'>"
-        "<table class='kpi-table'>"
-        "<thead><tr><th>Metric</th><th>Value</th><th>Window / note</th></tr></thead>"
-        f"<tbody>{body}</tbody>"
-        "</table>"
-        "</div>",
-        css_classes=["kpi-table-pane"],
-    )
-
-def meta_pill(label: str, value: str) -> str:
-    return (
-        "<div class='run-meta-pill' style='min-width:92px;border:1px solid #d8e1ee;border-radius:999px;"
-        "background:#f8fafc;padding:7px 11px;display:grid;gap:1px'>"
-        f"<div class='run-meta-label' style='color:#64748b;font-size:0.72rem;font-weight:760;"
-        f"letter-spacing:.075em;text-transform:uppercase'>{escape(label)}</div>"
-        f"<div class='run-meta-value' style='color:#0f172a;font-size:0.98rem;font-weight:800;"
-        f"line-height:1.1;font-variant-numeric:tabular-nums;white-space:nowrap'>{escape(value)}</div>"
-        "</div>"
-    )
 
 
 # Compact scientific-workbench overrides -------------------------------------

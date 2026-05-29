@@ -1,13 +1,13 @@
 """QCM viewer Panel application.
 
-This file intentionally only composes the app. The architecture is:
+Composition root only. Architecture:
 
 - ``state.py``: typed run/view state
 - ``controls.py``: Panel widgets and widget -> state conversion
 - ``data.py``: run queries and science transforms
-- ``pages.py``: visual components/pages
+- ``steps/*``: per-focus plot + secondary-panel contributors
 - ``actions.py``: mutations and exports
-- ``layout.py``: template/sidebar/tabs assembly
+- ``shell.py``: workbench assembly (context bar, focus rail, triad, drawer)
 """
 from __future__ import annotations
 
