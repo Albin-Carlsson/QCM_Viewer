@@ -1,10 +1,17 @@
-"""Stepper shell: context bar, step navigator, step canvas, footer, QC drawer."""
+"""Workbench shell.
+
+Owns the persistent triad (anchor plot + selection bar + live stats) and a
+focus rail that swaps the secondary panel and re-targets the plot brush. All
+analysis state stays in the single ViewerControls instance; ``focus`` is
+transient UI state held here.
+"""
 from __future__ import annotations
 
 import panel as pn
 
 from . import nav
 from .actions import ViewerActions
+from .components import pill, section_title
 from .controls import ViewerControls
 from .data import QCMViewData
 from .design import APP_CSS
@@ -18,7 +25,7 @@ from .steps.review import ReviewStep
 
 
 class ViewerShell:
-    """Assemble the guided stepper UI without owning analysis behavior."""
+    """Assemble the workbench without owning analysis behavior."""
 
     def __init__(self, run, info: RunInfo, controls: ViewerControls,
                  data: QCMViewData, actions: ViewerActions):
@@ -28,7 +35,9 @@ class ViewerShell:
         self.data = data
         self.actions = actions
 
-        self.step = pn.widgets.IntInput(value=0, visible=False)
+        self.focus = pn.widgets.IntInput(value=0, visible=False)
+        # Back-compat alias: existing tests/scripts set shell.step.value.
+        self.step = self.focus
         self.drawer_open = pn.widgets.Checkbox(value=False, visible=False)
 
         self._steps = {
@@ -39,17 +48,16 @@ class ViewerShell:
             "report": ReportStep(controls, data, actions),
         }
         self._qc = QCDrawer(controls, data, actions)
-        self.step.param.watch(self._on_step_change, "value")
-        # Initialize the brush target for the first step.
+        self.focus.param.watch(self._on_focus_change, "value")
         self.controls.brush_mode.value = nav.brush_target_for_step("review")
 
     # -- reactions --------------------------------------------------------
-    def _on_step_change(self, event) -> None:
+    def _on_focus_change(self, event) -> None:
         self.controls.brush_mode.value = nav.brush_target_for_step(nav.step_id(int(event.new)))
 
     def _go(self, index: int):
         def handler(_event=None):
-            self.step.value = nav.clamp_step(index)
+            self.focus.value = nav.clamp_step(index)
         return handler
 
     def _open_drawer(self, _event=None) -> None:
@@ -58,26 +66,29 @@ class ViewerShell:
     def _close_drawer(self, _event=None) -> None:
         self.drawer_open.value = False
 
-    # -- regions ----------------------------------------------------------
+    def _active_step(self, active):
+        return self._steps[nav.step_id(int(active))]
+
+    # -- persistent regions ----------------------------------------------
     def context_bar(self):
-        """Compact persistent toolbar.
-
-        The old run metadata block made the top of the app visually heavy and
-        repeated information that is not needed while analysing. Keep only the
-        controls that help orient the current workflow.
-        """
-        inspect_btn = pn.widgets.Button(name="Inspect raw sweeps", button_type="default", icon="microscope")
-        inspect_btn.on_click(self._open_drawer)
-
+        inspect = pn.widgets.Button(name="Inspect raw sweeps", button_type="default", icon="microscope")
+        inspect.on_click(self._open_drawer)
+        meta = pill("Duration", f"{self.info.span_s:,.0f} s") + pill("Channels", str(len(self.info.groups)))
+        readout = pn.bind(self.controls.zero_reference_summary,
+                          self.controls.t_range, self.controls.baseline_range)
         return pn.Row(
+            pn.pane.HTML(f"<div class='qcm-run-id'>{self.info.run_id}</div>", margin=0),
+            pn.pane.HTML(meta, margin=0),
+            self.controls.compact_channel_controls(),
             pn.layout.HSpacer(),
-            inspect_btn,
-            margin=0,
-            sizing_mode="stretch_width",
-            css_classes=["qcm-context-bar", "is-compact", "top-tools-only"],
+            readout,
+            inspect,
+            self.controls.save_state_button,
+            self.controls.status,
+            margin=0, sizing_mode="stretch_width", css_classes=["qcm-context-bar"],
         )
 
-    def navigator(self):
+    def focus_rail(self):
         def render(active: int):
             active = nav.clamp_step(int(active))
             buttons = []
@@ -85,37 +96,61 @@ class ViewerShell:
                 btn = pn.widgets.Button(
                     name=f"{i + 1}. {step.label}",
                     button_type="primary" if i == active else "default",
+                    sizing_mode="stretch_width",
                 )
                 btn.on_click(self._go(i))
                 buttons.append(btn)
-            return pn.Row(*buttons, margin=0, sizing_mode="stretch_width", css_classes=["qcm-step-nav"])
-        return pn.bind(render, self.step)
+            return pn.Column(*buttons, margin=0, css_classes=["qcm-focus-rail"])
+        return pn.bind(render, self.focus)
 
-    def step_canvas(self):
-        def render(active: int):
-            idx = nav.clamp_step(int(active))
-            step = nav.STEPS[idx]
-            return pn.Column(
-                self._steps[step.id].view(),
-                margin=0, sizing_mode="stretch_width",
-            )
-        return pn.bind(render, self.step)
+    def anchor(self):
+        def render(active, *_):
+            return self._active_step(active).anchor_plot()
+        return pn.bind(
+            render, self.focus,
+            *self.controls.explore_inputs,
+            self.controls.mark_range.param.value_throttled,
+            self.controls.analysis_region_select,
+            self.controls.annotation_version,
+            self.controls.plot_reset_version,
+        )
 
-    def footer(self):
-        back = pn.widgets.Button(name="‹ Back", button_type="default")
-        nxt = pn.widgets.Button(name="Next ›", button_type="primary")
-        back.on_click(lambda e: setattr(self.step, "value", nav.prev_step(int(self.step.value))))
-        nxt.on_click(lambda e: setattr(self.step, "value", nav.next_step(int(self.step.value))))
-        return pn.Row(back, pn.layout.HSpacer(), nxt, margin=0, sizing_mode="stretch_width", css_classes=["qcm-footer"])
+    def selection_bar(self):
+        tools = pn.Column(
+            self.controls.quantity_select,
+            self.controls.brush_mode,
+            pn.bind(self.controls.draw_mode_status, self.controls.brush_mode),
+            pn.Row(self.controls.plot_reset_button(), self.controls.use_selection_as_baseline,
+                   margin=0, sizing_mode="stretch_width", css_classes=["range-actions"]),
+            margin=0, sizing_mode="stretch_width",
+        )
+        return pn.Row(
+            self.controls.current_range_compact(),
+            self.controls.zero_reference_controls(),
+            tools,
+            margin=0, sizing_mode="stretch_width", css_classes=["qcm-selection-bar"],
+        )
+
+    def live_stats(self):
+        body = pn.bind(lambda *_: self._steps["review"].current_range_summary_cards(),
+                       *self.controls.signal_inputs)
+        return pn.Column(
+            section_title("Live statistics", eyebrow="current range"),
+            body, margin=0, sizing_mode="stretch_width", css_classes=["qcm-stats"],
+        )
+
+    def secondary(self):
+        def render(active):
+            return self._active_step(active).secondary_panel()
+        return pn.bind(render, self.focus)
 
     def drawer(self):
         close = pn.widgets.Button(name="Close ✕", button_type="default")
         close.on_click(self._close_drawer)
         panel = pn.Column(
-            pn.Row(
-                pn.pane.HTML("<b>Raw sweep / QC inspection</b>", margin=0), pn.layout.HSpacer(), close,
-                margin=0, sizing_mode="stretch_width", css_classes=["qcm-drawer-header"],
-            ),
+            pn.Row(pn.pane.HTML("<b>Raw sweep / QC inspection</b>", margin=0),
+                   pn.layout.HSpacer(), close, margin=0, sizing_mode="stretch_width",
+                   css_classes=["qcm-drawer-header"]),
             self._qc.view(),
             margin=0, sizing_mode="stretch_width", css_classes=["qcm-drawer"], visible=False,
         )
@@ -123,12 +158,22 @@ class ViewerShell:
         return panel
 
     def view(self):
+        plotzone = pn.Column(
+            pn.Card(self.anchor(), hide_header=True, margin=0,
+                    sizing_mode="stretch_width", css_classes=["qcm-anchor"]),
+            self.selection_bar(),
+            margin=0, sizing_mode="stretch_width", css_classes=["qcm-plotzone"],
+        )
+        rightzone = pn.Column(
+            self.live_stats(), self.secondary(),
+            margin=0, sizing_mode="stretch_width", css_classes=["qcm-rightzone"],
+        )
+        body = pn.Row(
+            self.focus_rail(), plotzone, rightzone,
+            margin=0, sizing_mode="stretch_width", css_classes=["qcm-body"],
+        )
         return pn.Column(
-            self.context_bar(),
-            self.navigator(),
-            self.step_canvas(),
-            self.footer(),
-            self.drawer(),
-            margin=0, sizing_mode="stretch_width", css_classes=["qcm-shell"],
-            stylesheets=[APP_CSS],
+            self.context_bar(), body, self.drawer(),
+            margin=0, sizing_mode="stretch_width",
+            css_classes=["qcm-app"], stylesheets=[APP_CSS],
         )
