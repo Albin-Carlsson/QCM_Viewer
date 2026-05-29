@@ -20,6 +20,7 @@ STEPS: tuple[Step, ...] = (
     Step("reference", "Reference"),
     Step("phases", "Phases"),
     Step("quantify", "Quantify"),
+    Step("echem", "Electrochemistry"),
     Step("report", "Report"),
 )
 
@@ -28,6 +29,7 @@ _BRUSH_BY_STEP = {
     "reference": "reference",
     "phases": "mark",
     "quantify": "current",
+    "echem": "current",
     "report": "current",
 }
 

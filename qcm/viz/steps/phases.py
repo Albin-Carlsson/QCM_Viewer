@@ -143,7 +143,8 @@ class PhasesStep(BaseStep):
             return pn.pane.Alert(f"Phase ranking failed: {exc}", alert_type="danger")
 
     def anchor_plot(self):
-        return self.phase_plot()
+        # Same unified plot as every other page; highlights the draft mark range.
+        return self.unified_anchor(window="mark")
 
     def secondary_panel(self):
         return pn.Column(

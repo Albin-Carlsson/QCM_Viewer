@@ -1,25 +1,27 @@
 from qcm.viz import nav
 
 
-def test_steps_are_five_in_order():
-    assert [s.id for s in nav.STEPS] == ["review", "reference", "phases", "quantify", "report"]
+def test_steps_are_in_order():
+    assert [s.id for s in nav.STEPS] == [
+        "review", "reference", "phases", "quantify", "echem", "report",
+    ]
 
 
 def test_clamp_step_bounds():
     assert nav.clamp_step(-3) == 0
-    assert nav.clamp_step(99) == 4
+    assert nav.clamp_step(99) == 5
     assert nav.clamp_step(2) == 2
 
 
 def test_step_id_from_index():
     assert nav.step_id(0) == "review"
-    assert nav.step_id(4) == "report"
+    assert nav.step_id(5) == "report"
     assert nav.step_id(50) == "report"
 
 
 def test_next_prev_clamp_at_ends():
     assert nav.next_step(0) == 1
-    assert nav.next_step(4) == 4
+    assert nav.next_step(5) == 5
     assert nav.prev_step(0) == 0
     assert nav.prev_step(3) == 2
 
@@ -29,6 +31,7 @@ def test_brush_target_follows_step():
     assert nav.brush_target_for_step("reference") == "reference"
     assert nav.brush_target_for_step("phases") == "mark"
     assert nav.brush_target_for_step("quantify") == "current"
+    assert nav.brush_target_for_step("echem") == "current"
     assert nav.brush_target_for_step("report") == "current"
     assert nav.brush_target_for_step("unknown") == "current"
 
@@ -47,5 +50,5 @@ def test_reference_hint_only_when_referenced_and_unset():
 
 def test_focus_labels_use_overview_first():
     assert [s.label for s in nav.STEPS] == [
-        "Overview", "Reference", "Phases", "Quantify", "Report",
+        "Overview", "Reference", "Phases", "Quantify", "Electrochemistry", "Report",
     ]

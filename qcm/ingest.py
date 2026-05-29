@@ -14,6 +14,10 @@ REQUIRED = [
     "conductance", "susceptance", "fit_center", "fit_gamma", "fit_fwhm",
 ]
 
+# Optional electrochemistry (EQCM) columns. Carried through when present so old
+# QCM-only parquet still ingests, while EQCM runs keep their cell-level channel.
+OPTIONAL = ["potential", "current", "charge", "cycle", "cycle_time"]
+
 # UI overview levels. These are deliberately tiny compared with the raw table;
 # the app should use these for plots and only touch raw data for individual sweeps
 # or explicit exports.
@@ -64,9 +68,11 @@ def _copy_raw_in_parts(files: list[Path], raw_out: Path, *, rows_per_part: int) 
     raw_out.mkdir(parents=True, exist_ok=True)
     part = 0
     rows = 0
+    schema_names = set(pq.read_schema(files[0]).names)
+    copy_columns = REQUIRED + [c for c in OPTIONAL if c in schema_names]
     for src in files:
         pf = pq.ParquetFile(src)
-        for batch in pf.iter_batches(batch_size=rows_per_part, columns=REQUIRED):
+        for batch in pf.iter_batches(batch_size=rows_per_part, columns=copy_columns):
             table = pa.Table.from_batches([batch])
             out = raw_out / f"part-{part:05d}.parquet"
             pq.write_table(
@@ -142,6 +148,20 @@ def build_pyramid(conn: duckdb.DuckDBPyConnection, dest: Path) -> None:
     app responsive with 1 GB+ raw imports.
     """
     raw = _raw_glob(dest)
+    raw_columns = {
+        r[0] for r in conn.execute(
+            f"SELECT column_name FROM (DESCRIBE SELECT * FROM read_parquet('{raw}'))"
+        ).fetchall()
+    }
+    echem_present = [c for c in OPTIONAL if c in raw_columns]
+    # Aggregate the cell-level EQCM channel per bucket. cycle is monotonic over
+    # time, so its bucket max is the last (integer-like) cycle index.
+    echem_select = "".join(f"\n                        {c}," for c in echem_present)
+    echem_agg_parts = []
+    for c in echem_present:
+        agg = f"max({c})" if c == "cycle" else f"avg({c})"
+        echem_agg_parts.append(f"{agg}::DOUBLE AS {c}")
+    echem_agg = "".join(f"\n                    {p}," for p in echem_agg_parts)
     for name, bucket_us in LEVELS.items():
         out_dir = dest / "pyramid" / name
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -160,7 +180,8 @@ def build_pyramid(conn: duckdb.DuckDBPyConnection, dest: Path) -> None:
                         conductance,
                         susceptance,
                         raw_i,
-                        raw_q
+                        raw_q,{echem_select}
+                        timestamp AS _ts_keep
                     FROM read_parquet('{raw}')
                 )
                 SELECT
@@ -172,7 +193,7 @@ def build_pyramid(conn: duckdb.DuckDBPyConnection, dest: Path) -> None:
                     avg(fit_fwhm)::DOUBLE AS fit_fwhm,
                     avg(fit_gamma)::DOUBLE AS fit_gamma,
                     max(conductance)::DOUBLE AS conductance_peak,
-                    avg(susceptance)::DOUBLE AS susceptance_mean,
+                    avg(susceptance)::DOUBLE AS susceptance_mean,{echem_agg}
                     count(*)::BIGINT AS count
                 FROM bucketed
                 GROUP BY bucket_ts, \"group\"

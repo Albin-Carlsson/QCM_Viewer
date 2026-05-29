@@ -18,6 +18,7 @@ from .controls import ViewerControls
 from .data import QCMViewData
 from .design import APP_CSS
 from .state import RunInfo
+from .steps.echem import ElectrochemistryStep
 from .steps.phases import PhasesStep
 from .steps.qc_drawer import QCDrawer
 from .steps.quantify import QuantifyStep
@@ -47,6 +48,7 @@ class ViewerShell:
             "reference": ReferenceStep(controls, data, actions),
             "phases": PhasesStep(controls, data, actions),
             "quantify": QuantifyStep(controls, data, actions),
+            "echem": ElectrochemistryStep(controls, data, actions),
             "report": ReportStep(controls, data, actions),
         }
         self._qc = QCDrawer(controls, data, actions)
@@ -108,7 +110,6 @@ class ViewerShell:
         return pn.Row(
             info,
             pn.layout.HSpacer(),
-            self.controls.compact_channel_controls(),
             inspect,
             self.controls.save_state_button,
             margin=0, sizing_mode="stretch_width", css_classes=["qcm-context-bar"],
@@ -151,7 +152,11 @@ class ViewerShell:
 
     def _build_selection_bar(self):
         tools = pn.Column(
-            self.controls.quantity_select,
+            pn.Row(
+                self.controls.x_axis_select,
+                self.controls.quantity_select,
+                margin=0, sizing_mode="stretch_width",
+            ),
             self.controls.brush_mode,
             pn.bind(self.controls.draw_mode_status, self.controls.brush_mode),
             pn.Row(self.controls.plot_reset_button(),
@@ -233,5 +238,5 @@ class ViewerShell:
         return pn.Column(
             self.context_bar(), body, self.drawer(),
             margin=0, sizing_mode="stretch_width",
-            css_classes=["qcm-app"], stylesheets=[APP_CSS],
+            css_classes=["qcm-app"],
         )

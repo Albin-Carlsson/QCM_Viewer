@@ -10,7 +10,7 @@ import polars as pl
 
 from .. import plots
 from .. import science  # noqa: F401  (kept for parity; used by subclasses)
-from ..theme import HERO_HEIGHT, quantity
+from ..theme import HERO_HEIGHT, axis, quantity
 from ..actions import ViewerActions
 from ..components import empty_state
 from ..controls import ViewerControls
@@ -276,38 +276,65 @@ class BaseStep:
             return "—"
         return f"{value:,.{digits}f}{suffix}"
 
-    def overview_anchor(self, window: str = "current"):
-        """Full-run selected-quantity plot used as the anchor for Overview,
-        Reference, and Report. ``window`` selects which range is highlighted."""
+    def unified_anchor(self, window: str = "current", state=None, height: int = HERO_HEIGHT):
+        """The single configurable analysis plot shown on every page.
+
+        Plots the selected y-quantity against the selected x-axis over the full
+        run, highlighting ``window`` (current / reference / mark) when the x-axis
+        is time. For QCM resonance quantities on the time axis it adds the ΔD twin
+        axis so the default Δf/n-vs-time view reproduces the canonical QCM-D
+        figure. Electrochemistry quantities (potential/current/charge/MPE) and
+        non-time x-axes drop the twin axis and the time-based overlays.
+        """
         try:
-            state = self.controls.state()
+            state = state or self.controls.state()
+            ax = axis(state.x_axis)
+            q = quantity(state.quantity)
             full = replace(state, t_range_s=(0.0, float(self.data.info.span_s)))
-            value_df, elapsed = self.data.value_df(full)
-            q = quantity(full.quantity)
+            value_df, elapsed = self.data.value_df(full, state.quantity, state.x_axis)
+
+            companion_df = None
+            companion_groups = None
+            if ax.is_time and q.is_resonance and q.key != "delta_D":
+                companion_df, _ = self.data.value_df(full, "delta_D", "time")
+                companion_groups = self.controls.dissipation_groups()
+
+            visible_groups = self.controls.frequency_groups() if q.kind == "frequency" else full.groups
+
             if window == "reference":
                 win = state.baseline_s
             elif window == "mark":
                 win = tuple(float(v) for v in self.controls.mark_range.value)
             else:
                 win = state.t_range_s
-            baseline = state.baseline_s if q.referenced and window != "reference" else None
-            title = f"{q.label} overview · {value_df.height:,} points · {elapsed:.0f} ms"
-            plot = plots.timeline(
+
+            title = f"{q.label} vs {ax.label} · {value_df.height:,} points · {elapsed:.0f} ms"
+            plot = plots.analysis_timeline(
                 value_df,
                 q,
+                ax,
                 full.groups,
                 full.orders,
                 title,
-                annotation_spans=self.data.annotation_spans(state),
-                baseline=baseline,
+                companion_df=companion_df,
+                visible_groups=visible_groups,
+                companion_groups=companion_groups,
+                baseline=state.baseline_s if (q.referenced and window != "reference") else None,
                 window=win,
-                select_x=True,
-                height=HERO_HEIGHT,
+                annotation_spans=self.data.annotation_spans(state),
+                select_x=ax.is_time,
+                height=height,
             )
-            plot = self.with_phase_labels(plot, value_df, height=HERO_HEIGHT)
-            return self.interactive_plot(self.force_plot_height(plot, HERO_HEIGHT))
+            if ax.is_time:
+                plot = self.with_phase_labels(plot, value_df, height=height)
+                return self.interactive_plot(self.force_plot_height(plot, height))
+            return self.nearest_hover(self.force_plot_height(plot, height))
         except Exception as exc:  # pragma: no cover
-            return pn.pane.Alert(f"Overview plot failed: {exc}", alert_type="danger")
+            return pn.pane.Alert(f"Plot failed: {exc}", alert_type="danger")
+
+    # Backward-compatible alias: the per-step anchors call this.
+    def overview_anchor(self, window: str = "current"):
+        return self.unified_anchor(window=window)
 
     def current_range_summary_cards(self):
         try:

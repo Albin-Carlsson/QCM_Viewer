@@ -25,6 +25,12 @@ def demo_data(
         "-p",
         help="Demo size preset: small for quick testing, long for a ~500 MB stress-test stream.",
     ),
+    technique: str = typer.Option(
+        "cv",
+        "--technique",
+        "-t",
+        help="Electrochemistry technique: cv (cyclic voltammetry) or cp (chronopotentiometry).",
+    ),
     target_mb: int | None = typer.Option(
         None,
         "--target-mb",
@@ -41,9 +47,12 @@ def demo_data(
     if preset not in PRESETS:
         valid = ", ".join(PRESETS)
         raise typer.BadParameter(f"Unknown preset {preset!r}. Choose one of: {valid}")
+    if technique not in ("cv", "cp"):
+        raise typer.BadParameter(f"Unknown technique {technique!r}. Choose 'cv' or 'cp'.")
     path = make_demo_data(
         out_dir,
         preset=preset,
+        technique=technique,
         groups=groups,
         sequences=sequences,
         points_per_sweep=points_per_sweep,
@@ -51,7 +60,7 @@ def demo_data(
         compression=compression,
     )
     size_mb = path.stat().st_size / (1024 * 1024)
-    console.print(f"Wrote {preset} demo parquet: {path} ({size_mb:.1f} MB)")
+    console.print(f"Wrote {preset} {technique.upper()} demo parquet: {path} ({size_mb:.1f} MB)")
 
 
 @app.command(name="ingest")

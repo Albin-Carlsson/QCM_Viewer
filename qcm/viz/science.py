@@ -13,7 +13,14 @@ from __future__ import annotations
 
 import polars as pl
 
-from .theme import DISSIPATION_SCALE, SAUERBREY_CONSTANT, Quantity, quantity as get_quantity
+from .theme import (
+    DISSIPATION_SCALE,
+    ELECTRODE_AREA_CM2,
+    FARADAY_CONSTANT,
+    SAUERBREY_CONSTANT,
+    Quantity,
+    quantity as get_quantity,
+)
 
 _KEEP = ("timestamp", "group")
 
@@ -24,8 +31,13 @@ def _raw_value(df: pl.DataFrame, q: Quantity) -> pl.Expr:
         return (pl.col("fit_fwhm") / pl.col("fit_center") * DISSIPATION_SCALE)
     if q.kind == "ratio":  # quality factor
         return (pl.col("fit_center") / pl.col("fit_fwhm"))
-    if q.kind in ("frequency", "mass"):
-        return pl.col("fit_center")  # referencing turns this into Δf
+    if q.kind in ("frequency", "mass", "mpe"):
+        # MPE/mass start from Δf/n (referencing turns fit_center into Δf).
+        return pl.col("fit_center")
+    if q.kind == "echem_density":  # current density = current / electrode area
+        return (pl.col("current") / ELECTRODE_AREA_CM2)
+    if q.kind == "echem":  # potential, current, charge — straight passthrough
+        return pl.col(q.sources[0])
     # raw passthrough (fit_center absolute, fit_fwhm, fit_gamma)
     return pl.col(q.sources[0])
 
@@ -41,8 +53,10 @@ def raw_value_sql(q: Quantity) -> str:
         return f"(fit_fwhm / fit_center * {DISSIPATION_SCALE})"
     if q.kind == "ratio":  # quality factor
         return "(fit_center / fit_fwhm)"
-    if q.kind in ("frequency", "mass"):
+    if q.kind in ("frequency", "mass", "mpe"):
         return "fit_center"
+    if q.kind == "echem_density":
+        return f"(current / {ELECTRODE_AREA_CM2})"
     return q.sources[0]
 
 
@@ -98,8 +112,26 @@ def compute(
         n_expr = pl.col("group").replace_strict(orders, default=1, return_dtype=pl.Int64)
         out = out.with_columns((pl.col("value") / n_expr).alias("value"))
 
-    if q.kind == "mass":  # Sauerbrey: m = -C * (Δf / n)
+    if q.kind in ("mass", "mpe"):  # Sauerbrey areal mass: m = -C * (Δf / n)
         out = out.with_columns((-SAUERBREY_CONSTANT * pl.col("value")).alias("value"))
+
+    if q.kind == "mpe":
+        # Mass per electron = F · d(total mass)/d(charge). Areal mass (ng/cm²) is
+        # converted to total mass in grams (× area cm² × 1e-9 ng→g) before the
+        # Faraday slope, so the result is a molar mass (g/mol). Computed as a
+        # finite difference per overtone over time; steps with no charge change
+        # are left null instead of dividing by zero.
+        out = out.sort(["group", "timestamp"]).with_columns(
+            (pl.col("value") * ELECTRODE_AREA_CM2 * 1e-9).alias("_mass_g")
+        )
+        dq = pl.col("charge").diff().over("group")
+        dm = pl.col("_mass_g").diff().over("group")
+        out = out.with_columns(
+            pl.when(dq.abs() > 1e-15)
+            .then(FARADAY_CONSTANT * dm / dq)
+            .otherwise(None)
+            .alias("value")
+        )
 
     return out.select([*_KEEP, "value"]).sort(["timestamp", "group"])
 

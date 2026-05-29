@@ -15,9 +15,9 @@ import polars as pl
 
 from qcm.run import QCMRun
 
-from . import plots, science
+from . import echem, plots, science
 from .state import RunInfo, ViewState
-from .theme import quantity
+from .theme import axis, quantity
 
 _US = 1_000_000
 _CACHE_SIZE = 64
@@ -59,8 +59,15 @@ class QCMViewData:
             return df.with_columns(pl.lit(0.0).alias(plots.X)) if not df.is_empty() else df
         return df.with_columns(((pl.col("timestamp") - self.info.t0_us) / _US).alias(plots.X))
 
-    def value_df(self, state: ViewState, quantity_key: str | None = None) -> tuple[pl.DataFrame, float]:
+    def value_df(
+        self,
+        state: ViewState,
+        quantity_key: str | None = None,
+        x_axis: str | None = None,
+    ) -> tuple[pl.DataFrame, float]:
         key = quantity_key or state.quantity
+        x_key = x_axis if x_axis is not None else getattr(state, "x_axis", "time")
+        ax = axis(x_key)
         q = quantity(key)
         groups = tuple(state.groups)
         t0, t1 = state.t_us(self.info.t0_us)
@@ -73,7 +80,34 @@ class QCMViewData:
             # it in SQL instead of scanning the raw window into Python.
             base_means = self._baseline_mean(science.raw_value_sql(q), b0, b1, groups)
         out = science.compute(main, key, state.orders, baseline_means_df=base_means)
-        return self.add_elapsed(out), (time.perf_counter() - tic) * 1000
+        out = self.add_elapsed(out)
+        out = self._attach_x(out, ax, t0, t1, groups)
+        return out, (time.perf_counter() - tic) * 1000
+
+    def _attach_x(self, out: pl.DataFrame, ax, t0: int, t1: int, groups: tuple[int, ...]) -> pl.DataFrame:
+        """Add an ``x`` column carrying the selected x-axis values.
+
+        Time uses the elapsed-seconds column already derived; every other axis
+        reads its stored column over the same window/groups and joins it in. The
+        ``x`` column is what plots map to the horizontal axis, leaving ``value``
+        (y) and the time-based overlays untouched.
+        """
+        if out.is_empty():
+            return out.with_columns(pl.lit(None, dtype=pl.Float64).alias("x"))
+        if ax.is_time:
+            return out.with_columns(pl.col(plots.X).cast(pl.Float64).alias("x"))
+        xdf = self._timeline((ax.source,), t0, t1, groups)
+        if xdf.is_empty() or ax.source not in xdf.columns:
+            return out.with_columns(pl.lit(None, dtype=pl.Float64).alias("x"))
+        # The electrochemistry x-source columns repeat for every frequency point
+        # of a sweep (they are constant per sweep), so collapse to one row per
+        # (timestamp, group) before joining — otherwise a raw-level join is
+        # many-to-many and blows up the row count.
+        xdf = (
+            xdf.select(["timestamp", "group", pl.col(ax.source).cast(pl.Float64).alias("x")])
+            .unique(subset=["timestamp", "group"], keep="first")
+        )
+        return out.join(xdf, on=["timestamp", "group"], how="left")
 
     def qcmd_frames(self, state: ViewState) -> tuple[pl.DataFrame, pl.DataFrame]:
         norm_df, _ = self.value_df(state, "delta_f_norm")
@@ -122,6 +156,23 @@ class QCMViewData:
         if not rows:
             return pl.DataFrame()
         return pl.concat(rows, how="diagonal_relaxed")
+
+    def has_echem(self) -> bool:
+        return echem.has_echem(self.run.columns)
+
+    def echem_waveform(self) -> pl.DataFrame:
+        """Full-run electrochemistry waveform: one row per sweep with the cell
+        signals. The channel is identical across overtones, so a single group is
+        read; results are cached because every EC view derives from this frame."""
+        cols = tuple(c for c in echem.ECHEM_COLUMNS if c in self.run.columns)
+        if not cols:
+            return pl.DataFrame()
+        groups = (self.info.groups[0],) if self.info.groups else ()
+        key = ("echem_wf", cols, groups)
+        return self._cache_get(
+            key,
+            lambda: echem.waveform(self._timeline(cols, self.info.t0_us, self.info.t1_us, groups)),
+        )
 
     def waterfall_df(self, state: ViewState) -> pl.DataFrame:
         t0, t1 = state.t_us(self.info.t0_us)

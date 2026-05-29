@@ -18,9 +18,10 @@ from typing import Literal
 import panel as pn
 
 from .state import RunInfo, ViewState, parse_orders
-from .theme import QUANTITIES, quantity
+from .theme import AXES, QUANTITIES, quantity
 
 _QUANTITY_OPTIONS = {q.label: key for key, q in QUANTITIES.items()}
+_AXIS_OPTIONS = {a.label: key for key, a in AXES.items()}
 _REGION_TYPES = {
     "Experiment phase": "phase",
     "Baseline / reference": "baseline",
@@ -164,6 +165,53 @@ class ViewerControls:
             sizing_mode="stretch_width",
         )
         self.show_all_channels_button.on_click(self.show_all_channels)
+        self.overtone_frequency: dict[int, pn.widgets.Checkbox] = {}
+        self.overtone_dissipation: dict[int, pn.widgets.Checkbox] = {}
+        self.overtone_normalize: dict[int, pn.widgets.Checkbox] = {}
+        self.overtone_frequency_all_button = pn.widgets.Button(
+            name="All",
+            button_type="default",
+            width=46,
+            height=26,
+            css_classes=["overtone-all-toggle"],
+        )
+        self.overtone_dissipation_all_button = pn.widgets.Button(
+            name="All",
+            button_type="default",
+            width=46,
+            height=26,
+            css_classes=["overtone-all-toggle"],
+        )
+        self.overtone_normalize_all_button = pn.widgets.Button(
+            name="All",
+            button_type="default",
+            width=46,
+            height=26,
+            css_classes=["overtone-all-toggle"],
+        )
+        self.overtone_frequency_all_button.on_click(lambda _event: self.toggle_overtone_column("frequency"))
+        self.overtone_dissipation_all_button.on_click(lambda _event: self.toggle_overtone_column("dissipation"))
+        self.overtone_normalize_all_button.on_click(lambda _event: self.toggle_overtone_column("normalize"))
+        saved_overtone_controls = self.saved.get("overtone_controls", {})
+        for g in self.info.groups:
+            n = int(self.info.orders.get(g, 1))
+            key = str(g)
+            saved_row = saved_overtone_controls.get(key, {}) if isinstance(saved_overtone_controls, dict) else {}
+            self.overtone_frequency[g] = pn.widgets.Checkbox(
+                name="Δf",
+                value=bool(saved_row.get("frequency", True)),
+                sizing_mode="stretch_width",
+            )
+            self.overtone_dissipation[g] = pn.widgets.Checkbox(
+                name="ΔD",
+                value=bool(saved_row.get("dissipation", True)),
+                sizing_mode="stretch_width",
+            )
+            self.overtone_normalize[g] = pn.widgets.Checkbox(
+                name="Δf/n",
+                value=bool(saved_row.get("normalize_frequency", True)),
+                sizing_mode="stretch_width",
+            )
 
         current_default = self._clean_range(self.saved.get("t_range_s", [0.0, self.info.span_s]))
         reference_default = self._clean_range(
@@ -292,8 +340,15 @@ class ViewerControls:
             css_classes=["range-mode-toggle", "draw-mode-toggle"],
         )
 
+        self.x_axis_select = pn.widgets.Select(
+            name="X-axis",
+            options=_AXIS_OPTIONS,
+            value=self.saved.get("x_axis", "time"),
+            sizing_mode="stretch_width",
+            css_classes=["compact-select", "x-axis-select"],
+        )
         self.quantity_select = pn.widgets.Select(
-            name="Quantity",
+            name="Y-axis",
             options=_QUANTITY_OPTIONS,
             value=self.saved.get("quantity", "delta_f_norm"),
             sizing_mode="stretch_width",
@@ -437,6 +492,7 @@ class ViewerControls:
         return (
             self.group_select,
             self.orders_text,
+            *self.overtone_signal_inputs,
             self.t_range.param.value_throttled,
             self.baseline_range.param.value_throttled,
             self.annotation_version,
@@ -444,8 +500,19 @@ class ViewerControls:
         )
 
     @property
+    def overtone_signal_inputs(self) -> tuple:
+        widgets = []
+        for g in self.info.groups:
+            widgets.extend([
+                self.overtone_frequency[g],
+                self.overtone_dissipation[g],
+                self.overtone_normalize[g],
+            ])
+        return tuple(widgets)
+
+    @property
     def explore_inputs(self) -> tuple:
-        return (*self.signal_inputs, self.quantity_select)
+        return (*self.signal_inputs, self.quantity_select, self.x_axis_select)
 
     @property
     def waterfall_band_input(self):
@@ -479,6 +546,42 @@ class ViewerControls:
     def orders(self) -> dict[int, int]:
         return parse_orders(self.orders_text.value, self.info.orders, self.info.groups)
 
+    def _overtone_column(self, column: str) -> dict[int, pn.widgets.Checkbox]:
+        if column == "frequency":
+            return self.overtone_frequency
+        if column == "dissipation":
+            return self.overtone_dissipation
+        if column == "normalize":
+            return self.overtone_normalize
+        raise ValueError(f"Unknown overtone control column: {column}")
+
+    def toggle_overtone_column(self, column: str) -> None:
+        controls = self._overtone_column(column)
+        target = not all(bool(widget.value) for widget in controls.values())
+        for widget in controls.values():
+            widget.value = target
+
+    def overtone_controls_state(self) -> dict[str, dict[str, bool]]:
+        return {
+            str(g): {
+                "frequency": bool(self.overtone_frequency[g].value),
+                "dissipation": bool(self.overtone_dissipation[g].value),
+                "normalize_frequency": bool(self.overtone_normalize[g].value),
+            }
+            for g in self.info.groups
+        }
+
+    def frequency_groups(self) -> list[int]:
+        groups = [g for g in self.selected_groups() if bool(self.overtone_frequency[g].value)]
+        return groups
+
+    def dissipation_groups(self) -> list[int]:
+        groups = [g for g in self.selected_groups() if bool(self.overtone_dissipation[g].value)]
+        return groups
+
+    def normalized_frequency_groups(self) -> set[int]:
+        return {g for g in self.info.groups if bool(self.overtone_normalize[g].value)}
+
     def state(self) -> ViewState:
         # The sliders are the canonical source of truth; numeric inputs are kept
         # synchronized with them and are included in ``signal_inputs`` only to
@@ -486,6 +589,7 @@ class ViewerControls:
         return ViewState(
             groups=self.selected_groups(),
             quantity=self.quantity_select.value,
+            x_axis=self.x_axis_select.value,
             t_range_s=tuple(float(v) for v in self.t_range.value),
             baseline_s=tuple(float(v) for v in self.baseline_range.value),
             orders=self.orders(),
@@ -496,6 +600,7 @@ class ViewerControls:
             frequency_band=tuple(float(v) for v in self.frequency_band.value),
             annotation_label=self.region_label.value,
             annotation_version=int(self.annotation_version.value),
+            overtone_controls=self.overtone_controls_state(),
         )
 
     def _safe_float(self, value, fallback: float) -> float:
@@ -1024,6 +1129,7 @@ class ViewerControls:
         """Small per-plot toolbar: reset scale, optional quantity selector, channels."""
         items = [self.plot_reset_button()]
         if include_quantity:
+            items.append(self.x_axis_select)
             items.append(self.quantity_select)
         items.append(self.compact_channel_controls())
         return pn.Row(
@@ -1044,6 +1150,53 @@ class ViewerControls:
             margin=0,
             sizing_mode="stretch_width",
             css_classes=["channel-controls"],
+        )
+
+    def overtone_controls(self):
+        def header(label: str, action=None):
+            items = [pn.pane.Markdown(f"<b>{label}</b>", margin=0)]
+            if action is not None:
+                items.append(action)
+            return pn.Column(
+                *items,
+                margin=0,
+                sizing_mode="stretch_width",
+                css_classes=["overtone-controls-header-cell"],
+            )
+
+        rows = []
+        rows.append(
+            pn.Row(
+                header("Overtone"),
+                header("Frequency", self.overtone_frequency_all_button),
+                header("Dissipation", self.overtone_dissipation_all_button),
+                header("Normalize", self.overtone_normalize_all_button),
+                margin=0,
+                sizing_mode="stretch_width",
+                css_classes=["overtone-controls-row", "overtone-controls-head"],
+            )
+        )
+        for slot, g in enumerate(self.info.groups):
+            n = self.info.orders.get(g, 1)
+            rows.append(
+                pn.Row(
+                    pn.pane.Markdown(f"**n={n}**", margin=0),
+                    self.overtone_frequency[g],
+                    self.overtone_dissipation[g],
+                    self.overtone_normalize[g],
+                    margin=0,
+                    sizing_mode="stretch_width",
+                    css_classes=["overtone-controls-row"],
+                )
+            )
+        return pn.Card(
+            *rows,
+            title="Overtone controls",
+            collapsible=True,
+            collapsed=False,
+            margin=0,
+            sizing_mode="stretch_width",
+            css_classes=["overtone-controls"],
         )
 
     def advanced_controls(self):

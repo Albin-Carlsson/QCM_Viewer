@@ -33,7 +33,21 @@ pn.extension("tabulator", sizing_mode="stretch_width", notifications=True)
 pn.config.loading_indicator = True
 hv.extension("bokeh")
 apply_plot_theme()
-pn.config.raw_css.append(APP_CSS)
+
+
+def _ensure_app_css() -> None:
+    """Register the app stylesheet for the *current* Panel session.
+
+    ``pn.config.raw_css`` is per-session: the first time a session reads it,
+    Panel copies the class-level default into ``_session_config[curdoc]``.
+    Appending at module import only mutates the one session whose ``curdoc``
+    happened to be active during the (cached) import, so every later session —
+    e.g. a browser refresh under ``panel serve`` — starts from the empty
+    default and renders unstyled. Re-registering here runs once per session
+    (with that session's ``curdoc`` live), so the CSS survives reloads.
+    """
+    if APP_CSS not in pn.config.raw_css:
+        pn.config.raw_css.append(APP_CSS)
 
 
 class QCMViewer:
@@ -79,6 +93,7 @@ class QCMViewer:
         )
 
     def view(self):
+        _ensure_app_css()
         return self.shell.view()
 
 

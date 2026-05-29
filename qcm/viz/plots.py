@@ -16,6 +16,7 @@ import polars as pl
 from .theme import (
     ACCENT,
     BASELINE_COLOR,
+    ELAPSED_COLUMN,
     EVENT_COLOR,
     HERO_HEIGHT,
     MAX_PLOT_POINTS,
@@ -23,11 +24,12 @@ from .theme import (
     COMPACT_PLOT_HEIGHT,
     SWEEP_PANEL_HEIGHT,
     WATERFALL_PANEL_HEIGHT,
+    Axis,
     Quantity,
     color_for_slot,
 )
 
-X = "elapsed_s"
+X = ELAPSED_COLUMN
 X_LABEL = "Time [s]"
 
 
@@ -314,6 +316,138 @@ def timeline(
     )
 
 
+def _xy_axis(value_df: pl.DataFrame, group: int, monotonic: bool, max_points: int = MAX_PLOT_POINTS):
+    """Per-group (x, y) pair for the configurable analysis plot.
+
+    Reads the generic ``x`` column (set by the data service for the chosen
+    x-axis) and ``value`` (y). Monotonic axes (time, cumulative cycle number) use
+    the time-style min/max envelope after sorting by x; non-monotonic axes (a CV
+    potential sweep, charge that reverses, per-cycle time) keep their measurement
+    order and are capped with a uniform stride so the trajectory survives.
+    """
+    sub = value_df.filter(pl.col("group") == group).drop_nulls(["value", "x"])
+    if sub.is_empty():
+        return sub["x"].to_numpy(), sub["value"].to_numpy()
+    if monotonic:
+        sub = sub.sort("x")
+        return _decimate_xy(sub["x"].to_numpy(), sub["value"].to_numpy(), max_points)
+    sub = sub.sort("timestamp")
+    x = sub["x"].to_numpy()
+    y = sub["value"].to_numpy()
+    if max_points > 0 and len(x) > max_points:
+        step = len(x) // max_points + 1
+        x, y = x[::step], y[::step]
+    return x, y
+
+
+def analysis_timeline(
+    value_df: pl.DataFrame,
+    q: Quantity,
+    ax: Axis,
+    groups: list[int],
+    orders: dict[int, int],
+    title: str,
+    *,
+    companion_df: pl.DataFrame | None = None,
+    visible_groups: list[int] | None = None,
+    companion_groups: list[int] | None = None,
+    baseline: tuple[float, float] | None = None,
+    window: tuple[float, float] | None = None,
+    annotation_spans: list | None = None,
+    select_x: bool = False,
+    height: int = PLOT_HEIGHT,
+):
+    """Unified analysis plot: selected y-quantity vs selected x-axis.
+
+    One curve per visible overtone for QCM resonance quantities; a single curve
+    for cell-level electrochemistry quantities (potential/current/charge) since
+    those are shared across overtones. When ``companion_df`` (ΔD) is supplied it
+    is drawn on a twin right axis — this reproduces the canonical QCM-D figure for
+    the default Δf/n-vs-time view.
+
+    Time-based overlays (analysis window, reference span, saved-region markers,
+    and the x box-select brush) are only meaningful on the time axis, so they are
+    drawn only when ``ax`` is time.
+    """
+    on_time = ax.is_time
+    labels = series_labels(groups, orders)
+    visible_groups = list(groups if visible_groups is None else visible_groups)
+    elements: list = list(window_elements(window)) if on_time else []
+    if on_time and baseline is not None:
+        elements.append(baseline_span(*baseline))
+
+    left_curves: list = []
+    if q.is_echem:
+        # Cell-level signal: identical across overtones, so draw it once.
+        g0 = groups[0] if groups else 0
+        x, y = _xy_axis(value_df, g0, ax.monotonic)
+        if len(x):
+            left_curves.append(
+                hv.Curve((x, y), ax.axis_label, q.axis_label, label=q.label).opts(
+                    color=ACCENT, line_width=1.9
+                )
+            )
+    else:
+        for slot, g in enumerate(groups):
+            if g not in visible_groups:
+                continue
+            x, y = _xy_axis(value_df, g, ax.monotonic)
+            if not len(x):
+                continue
+            left_curves.append(
+                hv.Curve((x, y), ax.axis_label, q.axis_label, label=labels[g]).opts(
+                    color=color_for_slot(slot), line_width=1.8
+                )
+            )
+
+    right_curves: list = []
+    d_lo, d_hi = 0.0, 1.0
+    companion_label = "ΔD  [×10⁻⁶]"
+    if companion_df is not None and not companion_df.is_empty():
+        comp_groups = list(groups if companion_groups is None else companion_groups)
+        d_vals = companion_df.filter(pl.col("group").is_in(comp_groups)).drop_nulls("value")["value"]
+        if d_vals.len():
+            d_lo, d_hi = float(d_vals.min()), float(d_vals.max())
+        for slot, g in enumerate(groups):
+            if g not in comp_groups:
+                continue
+            x, y = _xy_axis(companion_df, g, ax.monotonic)
+            if not len(x):
+                continue
+            right_curves.append(
+                hv.Curve((x, y), ax.axis_label, companion_label, label=f"ΔD {labels[g]}").opts(
+                    color=color_for_slot(slot), line_width=1.4, line_dash=[6, 4]
+                )
+            )
+
+    elements.extend(left_curves)
+    elements.extend(right_curves)
+    if on_time:
+        elements.extend(annotation_elements(annotation_spans or []))
+    if not left_curves and not right_curves:
+        return empty(f"No {q.label} data")
+
+    tools, active = _time_tools(select_x)
+    hooks: list = []
+    if right_curves:
+        hooks.append(_twin_axis_hook(d_lo, d_hi, companion_label))
+    # Vertical-line hover only makes sense when traces share a monotonic x.
+    if ax.monotonic:
+        hooks.append(_vline_hover_hook)
+    hooks.append(_legend_mute_hook)
+    if on_time:
+        hooks.append(_saved_region_label_hook(annotation_spans or []))
+        if select_x:
+            hooks.append(_xbox_select_hook)
+    return hv.Overlay(elements).opts(
+        hv.opts.Overlay(
+            title=title, height=height, responsive=True, legend_position="right",
+            active_tools=active, tools=tools, hooks=hooks, show_grid=True,
+        ),
+        hv.opts.Curve(tools=["hover"]),
+    )
+
+
 def _twin_axis_hook(d_lo: float, d_hi: float, axis_label: str):
     """Route dashed (ΔD) glyphs to a second right-hand y-axis."""
     def hook(plot, _element):
@@ -338,6 +472,10 @@ def dual_axis_qcmd(
     groups: list[int],
     orders: dict[int, int],
     title: str,
+    raw_f_df: pl.DataFrame | None = None,
+    frequency_groups: list[int] | None = None,
+    dissipation_groups: list[int] | None = None,
+    normalized_frequency_groups: set[int] | None = None,
     baseline: tuple[float, float] | None = None,
     annotation_spans: list | None = None,
     window: tuple[float, float] | None = None,
@@ -346,27 +484,41 @@ def dual_axis_qcmd(
 ):
     """Canonical QCM-D plot: Δf/n (left, solid) and ΔD (right, dashed)."""
     labels = series_labels(groups, orders)
+    frequency_groups = list(groups if frequency_groups is None else frequency_groups)
+    dissipation_groups = list(groups if dissipation_groups is None else dissipation_groups)
+    normalized_frequency_groups = set(groups if normalized_frequency_groups is None else normalized_frequency_groups)
+    mixed_frequency_scale = any(g not in normalized_frequency_groups for g in frequency_groups)
+    left_axis = "Δf / n or Δf  [Hz]" if mixed_frequency_scale else "Δf / n  [Hz]"
     left, right = [], []
     for slot, g in enumerate(groups):
         color = color_for_slot(slot)
-        fx, fy = _xy(norm_df, g)
+        if g in frequency_groups:
+            use_norm = g in normalized_frequency_groups or raw_f_df is None
+            f_df = norm_df if use_norm else raw_f_df
+            f_label = "Δf/n" if use_norm else "Δf"
+            fx, fy = _xy(f_df, g)
+        else:
+            fx, fy = [], []
         if len(fx):
             left.append(
-                hv.Curve((fx, fy), X_LABEL, "Δf / n  [Hz]", label=f"Δf/n {labels[g]}").opts(
+                hv.Curve((fx, fy), X_LABEL, left_axis, label=f"{f_label} {labels[g]}").opts(
                     color=color, line_width=2.0
                 )
             )
-        dx, dy = _xy(d_df, g)
+        if g in dissipation_groups:
+            dx, dy = _xy(d_df, g)
+        else:
+            dx, dy = [], []
         if len(dx):
             right.append(
-                hv.Curve((dx, dy), X_LABEL, "Δf / n  [Hz]", label=f"ΔD {labels[g]}").opts(
+                hv.Curve((dx, dy), X_LABEL, "ΔD  [×10⁻⁶]", label=f"ΔD {labels[g]}").opts(
                     color=color, line_width=1.4, line_dash=[6, 4]
                 )
             )
     if not left and not right:
         return empty("No QCM-D data")
 
-    d_vals = d_df.drop_nulls("value")["value"]
+    d_vals = d_df.filter(pl.col("group").is_in(dissipation_groups)).drop_nulls("value")["value"]
     d_lo = float(d_vals.min()) if d_vals.len() else 0.0
     d_hi = float(d_vals.max()) if d_vals.len() else 1.0
 
@@ -425,6 +577,77 @@ def df_fingerprint(norm_df: pl.DataFrame, d_df: pl.DataFrame, groups: list[int],
             height=COMPACT_PLOT_HEIGHT, responsive=True, legend_position="right",
             active_tools=["wheel_zoom"], tools=["hover", "box_zoom", "reset"],
             hooks=[_legend_mute_hook], show_grid=True,
+        ),
+        hv.opts.Curve(tools=["hover"]),
+    )
+
+
+def echem_curve(
+    wf: pl.DataFrame,
+    xcol: str,
+    ycol: str,
+    xlabel: str,
+    ylabel: str,
+    title: str,
+    *,
+    by_cycle: bool = True,
+    monotonic: bool = False,
+    height: int = PLOT_HEIGHT,
+):
+    """One line plot of an electrochemistry waveform (one row per sweep).
+
+    When ``by_cycle`` is set each cycle is drawn as its own colored trace, which
+    gives the familiar per-cycle overlay for an i–E voltammogram or a CP
+    capacity curve. ``monotonic`` selects the time-style min/max envelope
+    decimation for axes that increase with time (vs a uniform stride for phase
+    portraits whose x reverses, like i–E or E–charge loops).
+    """
+    if wf.is_empty() or xcol not in wf.columns or ycol not in wf.columns:
+        return empty(f"No {ylabel} data")
+    sort_col = "time_s" if "time_s" in wf.columns else xcol
+
+    def _decimate(x, y):
+        if monotonic:
+            return _decimate_xy(x, y)
+        if len(x) > MAX_PLOT_POINTS:
+            step = len(x) // MAX_PLOT_POINTS + 1
+            return x[::step], y[::step]
+        return x, y
+
+    curves: list = []
+    if by_cycle and "cycle" in wf.columns:
+        cycles = sorted(int(c) for c in wf["cycle"].unique().drop_nulls().to_list())
+        for slot, cyc in enumerate(cycles):
+            sub = wf.filter(pl.col("cycle") == cyc).sort(sort_col).drop_nulls([xcol, ycol])
+            if sub.is_empty():
+                continue
+            x, y = _decimate(sub[xcol].to_numpy(), sub[ycol].to_numpy())
+            if not len(x):
+                continue
+            curves.append(
+                hv.Curve((x, y), xlabel, ylabel, label=f"cycle {cyc}").opts(
+                    color=color_for_slot(slot), line_width=1.5
+                )
+            )
+    else:
+        sub = wf.sort(sort_col).drop_nulls([xcol, ycol])
+        if not sub.is_empty():
+            x, y = _decimate(sub[xcol].to_numpy(), sub[ycol].to_numpy())
+            if len(x):
+                curves.append(
+                    hv.Curve((x, y), xlabel, ylabel).opts(color=ACCENT, line_width=1.7)
+                )
+
+    if not curves:
+        return empty(f"No {ylabel} data")
+    hooks = [_legend_mute_hook]
+    if monotonic:
+        hooks.insert(0, _vline_hover_hook)
+    return hv.Overlay(curves).opts(
+        hv.opts.Overlay(
+            title=title, height=height, responsive=True, legend_position="right",
+            active_tools=["wheel_zoom"], tools=["hover", "box_zoom", "reset"],
+            hooks=hooks, show_grid=True,
         ),
         hv.opts.Curve(tools=["hover"]),
     )

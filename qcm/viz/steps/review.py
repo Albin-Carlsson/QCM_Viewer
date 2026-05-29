@@ -15,6 +15,7 @@ class ReviewStep(BaseStep):
         return pn.Column(
             hint("Inspect the full experiment and choose the analysis range by "
                  "dragging on the plot.", tone="info"),
+            self.controls.overtone_controls(),
             self.controls.advanced_controls(),
             margin=0, sizing_mode="stretch_width", css_classes=["qcm-secondary"],
         )

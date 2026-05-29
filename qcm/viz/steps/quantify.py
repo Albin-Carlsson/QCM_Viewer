@@ -177,7 +177,9 @@ class QuantifyStep(BaseStep):
         return pn.Spacer(height=0)
 
     def anchor_plot(self):
-        return self.quantity_plot()
+        # Same unified plot as every other page; the analysis target zooms the
+        # highlighted window to a saved marker when one is selected.
+        return self.unified_anchor(window="current", state=self.target_state())
 
     def secondary_panel(self):
         hint_block = pn.bind(lambda *_: self._reference_hint(), *self.controls.explore_inputs)

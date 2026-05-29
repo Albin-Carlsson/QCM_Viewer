@@ -1,7 +1,7 @@
 """Typed view state for the QCM Panel UI."""
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 _US = 1_000_000
@@ -30,7 +30,8 @@ class ViewState:
     """Complete UI state needed to render plots/tables/export data."""
 
     groups: list[int]
-    quantity: str
+    quantity: str  # selected y-axis quantity key
+    x_axis: str  # selected x-axis dimension key (see theme.AXES)
     t_range_s: tuple[float, float]
     baseline_s: tuple[float, float]
     orders: dict[int, int]
@@ -41,6 +42,7 @@ class ViewState:
     frequency_band: tuple[float, float]
     annotation_label: str = ""
     annotation_version: int = 0
+    overtone_controls: dict[str, dict[str, bool]] = field(default_factory=dict)
 
     def t_us(self, t0_us: int) -> tuple[int, int]:
         start, end = self.t_range_s

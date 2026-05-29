@@ -105,6 +105,12 @@ html, body {
 .qcm-hint { display: flex; gap: var(--qcm-space-2); align-items: center; border-radius: var(--qcm-radius-md); padding: var(--qcm-space-2) var(--qcm-space-3); font-size: 0.86rem; }
 .qcm-hint.info { border: 1px solid #bfdbfe; background: var(--qcm-accent-soft); color: var(--qcm-accent-strong); }
 .qcm-hint.warning { border: 1px solid #fde68a; background: #fffbeb; color: #92400e; }
+.overtone-controls-row { display: grid; grid-template-columns: minmax(62px, .9fr) repeat(3, minmax(74px, 1fr)); gap: var(--qcm-space-2); align-items: center; }
+.overtone-controls-head { color: var(--qcm-muted); font-size: 0.78rem; }
+.overtone-controls-header-cell { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.overtone-controls .overtone-all-toggle .bk-btn { min-height: 24px; padding: 2px 9px; font-size: 0.72rem; line-height: 1; border: 1px solid #111827; background: var(--qcm-surface-muted); color: var(--qcm-text); }
+.overtone-controls .overtone-all-toggle .bk-btn:hover { border-color: #000; color: #000; background: #fff; }
+.overtone-controls .bk-input-group { margin: 0; }
 
 /* Inputs / tables ------------------------------------------------------ */
 .bk-input, .bk-input-group input, select, textarea { border-radius: var(--qcm-radius-sm); border-color: var(--qcm-border-strong); color: var(--qcm-text); background-color: #fff; font-variant-numeric: tabular-nums; }
