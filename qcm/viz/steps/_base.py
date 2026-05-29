@@ -1,13 +1,16 @@
 """Shared presentation helpers for stepper step views (copied from BasePage)."""
 from __future__ import annotations
 
+from dataclasses import replace
 from math import isfinite
 
 import holoviews as hv
 import panel as pn
 import polars as pl
 
+from .. import plots
 from .. import science  # noqa: F401  (kept for parity; used by subclasses)
+from ..theme import HERO_HEIGHT
 from ..actions import ViewerActions
 from ..components import empty_state
 from ..controls import ViewerControls
@@ -267,6 +270,25 @@ class BaseStep:
         if not isfinite(value):
             return "—"
         return f"{value:,.{digits}f}{suffix}"
+
+    def overview_anchor(self, window: str = "current"):
+        """Full-run dual-axis QCM-D plot used as the anchor for Overview,
+        Reference, and Report. ``window`` selects which range is highlighted."""
+        try:
+            state = self.controls.state()
+            full = replace(state, t_range_s=(0.0, float(self.data.info.span_s)))
+            norm_df, d_df = self.data.qcmd_frames(full)
+            win = state.t_range_s if window == "current" else state.baseline_s
+            plot = plots.dual_axis_qcmd(
+                norm_df, d_df, full.groups, full.orders, "QCM-D overview",
+                baseline=state.baseline_s,
+                annotation_spans=self.data.annotation_spans(state),
+                window=win, select_x=True, height=HERO_HEIGHT,
+            )
+            plot = self.with_phase_labels(plot, norm_df, height=HERO_HEIGHT)
+            return self.interactive_plot(self.force_plot_height(plot, HERO_HEIGHT))
+        except Exception as exc:  # pragma: no cover
+            return pn.pane.Alert(f"QCM-D plot failed: {exc}", alert_type="danger")
 
     def current_range_summary_cards(self):
         try:
