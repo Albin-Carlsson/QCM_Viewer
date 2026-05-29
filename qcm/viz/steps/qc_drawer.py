@@ -63,7 +63,6 @@ class QCDrawer(BaseStep):
         )
         waterfall_controls = pn.Card(
             self.controls.frequency_band,
-            self.controls.overview_range_controls(),
             title="Waterfall controls",
             collapsible=True,
             collapsed=False,
