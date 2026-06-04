@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import polars as pl
 
-from .theme import ELECTRODE_AREA_CM2
+from .theme import ELECTRODE_AREA_CM2, FARADAY_CONSTANT
 
 _US = 1_000_000
 
@@ -219,6 +219,35 @@ def _cp_cycle_ce(wf: pl.DataFrame) -> pl.DataFrame:
     return per.sort("cycle")
 
 
+def half_cycle_mpe(joined: pl.DataFrame, area: float = ELECTRODE_AREA_CM2) -> pl.DataFrame:
+    """Static plating/stripping MPE per cycle = ``F · Δm(g) / Δq`` over each half.
+
+    ``joined`` carries one row per timestamp with ``cycle``, ``_is_plate`` (from
+    :func:`derive_cycles`), the cumulative ``charge`` (C), and ``_mass`` (areal
+    Sauerbrey mass in ng/cm²). Δm and Δq are endpoint differences over each half;
+    ``area`` converts areal mass to total grams. Returns ``[cycle,
+    MPE_plating_g_per_mol, MPE_stripping_g_per_mol]``. Sign follows the cumulative
+    charge convention, matching the app's other MPE figures.
+    """
+    if joined.is_empty() or "_is_plate" not in joined.columns:
+        return pl.DataFrame(schema={"cycle": pl.Int64})
+    dm = (pl.col("_mass").sort_by("timestamp").last()
+          - pl.col("_mass").sort_by("timestamp").first()).alias("_dm_ng")
+    dq = (pl.col("charge").sort_by("timestamp").last()
+          - pl.col("charge").sort_by("timestamp").first()).alias("_dq")
+    mpe = (
+        pl.when(pl.col("_dq").abs() > 1e-15)
+        .then(FARADAY_CONSTANT * (pl.col("_dm_ng") * area * 1e-9) / pl.col("_dq"))
+        .otherwise(None).round(2)
+    )
+    half = joined.group_by(["cycle", "_is_plate"]).agg([dm, dq]).with_columns(mpe.alias("_mpe"))
+    plating = half.filter(pl.col("_is_plate")).select(
+        ["cycle", pl.col("_mpe").alias("MPE_plating_g_per_mol")])
+    stripping = half.filter(~pl.col("_is_plate")).select(
+        ["cycle", pl.col("_mpe").alias("MPE_stripping_g_per_mol")])
+    return plating.join(stripping, on="cycle", how="full", coalesce=True).sort("cycle")
+
+
 def cycle_values(df: pl.DataFrame) -> list[int]:
     """Sorted distinct cycle indices present in the data."""
     if df.is_empty() or "cycle" not in df.columns:
@@ -271,6 +300,8 @@ CYCLE_COLUMN_TITLES: dict[str, str] = {
     "CE_time": "CE (time)",
     "CE_charge": "CE (charge)",
     "mass_accum_ng_cm2": "Mass accumulation (ng/cm²)",
+    "MPE_plating_g_per_mol": "MPE plating (g/mol)",
+    "MPE_stripping_g_per_mol": "MPE stripping (g/mol)",
 }
 
 
