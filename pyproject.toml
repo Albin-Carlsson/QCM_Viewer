@@ -20,6 +20,7 @@ dependencies = [
   "polars>=1.0",
   "pyarrow>=16.0",
   "pydantic>=2.7",
+  "scipy>=1.11",
   "rich>=13.7",
   "typer>=0.12",
   "pywebview>=6.2.1",

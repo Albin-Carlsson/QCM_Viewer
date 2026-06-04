@@ -356,6 +356,9 @@ class BaseStep:
                 height=height,
                 show_legend=show_legend,
                 cycle_spans=cycle_spans,
+                target=(state.params.target_mpe
+                        if (q.kind == "mpe" and getattr(state, "mpe_target_show", False))
+                        else None),
             )
             zero_w = getattr(self.controls, "zero_line", None)
             if zero_w is not None and bool(zero_w.value):

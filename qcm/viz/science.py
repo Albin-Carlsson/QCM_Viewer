@@ -132,14 +132,66 @@ def compute(
         )
         dq = pl.col("charge").diff().over("group")
         dm = pl.col("_mass_g").diff().over("group")
+        # Reported as a positive magnitude (g/mol) so it compares directly against
+        # the theoretical M/z target. The leading minus cancels the cumulative
+        # cathodic-charge sign (plating: Δm>0, Δq<0) that would otherwise make the
+        # ratio negative.
         out = out.with_columns(
             pl.when(dq.abs() > 1e-15)
-            .then(FARADAY_CONSTANT * dm / dq)
+            .then(-FARADAY_CONSTANT * dm / dq)
             .otherwise(None)
             .alias("value")
         )
 
     return out.select([*_KEEP, "value"]).sort(["timestamp", "group"])
+
+
+def smooth_clip_mpe(
+    value_df: pl.DataFrame,
+    *,
+    clip: tuple[float, float] | None = None,
+    smooth: bool = False,
+    window: int = 51,
+    polyorder: int = 2,
+) -> pl.DataFrame:
+    """Clip MPE outliers and optionally Savitzky–Golay smooth, per group.
+
+    The dynamic MPE (Δf/ΔQ) is very noisy and spikes where the charge barely
+    changes. ``clip`` first bounds values to ``(lo, hi)`` so those artifacts don't
+    dominate; ``smooth`` then applies a Savgol filter along time within each group
+    (window auto-shrunk to an odd value ≤ the group length). Input/return frames
+    carry ``timestamp, group, value`` (plus any extra columns, preserved).
+    """
+    if value_df.is_empty() or "value" not in value_df.columns:
+        return value_df
+    out = value_df
+    if clip is not None:
+        lo, hi = sorted(clip)
+        out = out.with_columns(pl.col("value").clip(lo, hi).alias("value"))
+    if not smooth:
+        return out
+
+    import numpy as np
+    from scipy.signal import savgol_filter
+
+    out = out.sort(["group", "timestamp"])
+
+    def _smooth_group(df: pl.DataFrame) -> pl.DataFrame:
+        y = df["value"].to_numpy()
+        mask = ~np.isnan(y)
+        n = int(mask.sum())
+        w = min(int(window), n)
+        if w % 2 == 0:
+            w -= 1
+        if w >= 5 and w > polyorder:
+            sm = y.copy()
+            sm[mask] = savgol_filter(y[mask], w, polyorder)
+            # ``y`` carried NaN where the source was null; keep those as nulls
+            # (not NaN) so downstream drop_nulls/stats behave.
+            df = df.with_columns(pl.Series("value", sm).fill_nan(None))
+        return df
+
+    return out.group_by("group", maintain_order=True).map_groups(_smooth_group)
 
 
 def summary_stats(value_df: pl.DataFrame) -> pl.DataFrame:
