@@ -4,7 +4,7 @@ from __future__ import annotations
 import panel as pn
 
 from .. import plots
-from ..components import stat_badge
+from ..components import empty_state, stat_badge
 from ._base import BaseStep
 
 
@@ -48,6 +48,18 @@ class QCDrawer(BaseStep):
         )
 
     def view(self):
+        if not self.data.has_raw():
+            return pn.Column(
+                empty_state(
+                    "This run has no raw frequency-point data (it was imported from "
+                    "fitted Fr/D values), so sweep, I/Q, and waterfall inspection are "
+                    "unavailable. Δf/n, dissipation, mass, and electrochemistry views "
+                    "still work."
+                ),
+                margin=0,
+                sizing_mode="stretch_width",
+                css_classes=["workbench-page", "viewer-page"],
+            )
         controls = pn.Card(
             self.controls.sequence,
             pn.Row(self.controls.previous_sweep_button, self.controls.next_sweep_button, margin=0, sizing_mode="stretch_width"),

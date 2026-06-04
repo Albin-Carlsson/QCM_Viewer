@@ -9,14 +9,33 @@ import pyarrow.parquet as pq
 from .models import Manifest, PathsInfo, TimeInfo
 from .timeutil import now_iso
 
-REQUIRED = [
-    "timestamp", "sequence", "group", "frequency", "raw_i", "raw_q",
-    "conductance", "susceptance", "fit_center", "fit_gamma", "fit_fwhm",
+# The minimal contract every run must satisfy: a timestamp, a sweep id, an
+# overtone group, and the fitted resonance (centre + linewidth) the science layer
+# turns into Δf/n, dissipation, mass, etc. Everything else is optional so that
+# fit-level instrument exports (Qsoft Fr/D per overtone) are first-class without
+# the raw frequency-point columns.
+CORE_REQUIRED = [
+    "timestamp", "sequence", "group", "fit_center", "fit_fwhm",
 ]
+
+# Raw resonance columns. Present for full raw-sweep runs (raw I/Q, conductance/
+# susceptance traces, per-point frequency, fit gamma); absent for fit-only runs,
+# in which case raw-only views (sweep inspector, waterfall) degrade gracefully.
+RAW_OPTIONAL = ["frequency", "fit_gamma", "conductance", "susceptance", "raw_i", "raw_q"]
 
 # Optional electrochemistry (EQCM) columns. Carried through when present so old
 # QCM-only parquet still ingests, while EQCM runs keep their cell-level channel.
-OPTIONAL = ["potential", "current", "charge", "cycle", "cycle_time"]
+ECHEM_OPTIONAL = ["potential", "current", "charge", "cycle", "cycle_time"]
+
+# All optional columns, in copy order.
+OPTIONAL = RAW_OPTIONAL + ECHEM_OPTIONAL
+
+# A run is considered to carry raw frequency-point data when this column is
+# present; raw-only UI surfaces key off it.
+RAW_MARKER = "raw_i"
+
+# Backwards-compatible alias.
+REQUIRED = CORE_REQUIRED
 
 # UI overview levels. These are deliberately tiny compared with the raw table;
 # the app should use these for plots and only touch raw data for individual sweeps
@@ -114,23 +133,43 @@ def _metadata(conn: duckdb.DuckDBPyConnection, dest: Path) -> tuple[int, int, li
     return int(t0), int(t1), groups, int(rows)
 
 
+def _raw_columns(conn: duckdb.DuckDBPyConnection, dest: Path) -> set[str]:
+    raw = _raw_glob(dest)
+    return {
+        r[0] for r in conn.execute(
+            f"SELECT column_name FROM (DESCRIBE SELECT * FROM read_parquet('{raw}'))"
+        ).fetchall()
+    }
+
+
 def build_sweep_index(conn: duckdb.DuckDBPyConnection, dest: Path) -> None:
-    """Build one row per sequence/group from raw parts using DuckDB SQL."""
+    """Build one row per sequence/group from raw parts using DuckDB SQL.
+
+    Optional raw columns (per-point ``frequency``, ``fit_gamma``) are only
+    aggregated when present, so a fit-only run produces a valid index without
+    them.
+    """
     out = dest / "sweeps"
     out.mkdir(exist_ok=True)
     raw = _raw_glob(dest)
+    present = _raw_columns(conn, dest)
     target = _sql_path(out / "index.parquet")
+    optional_aggs = ""
+    if "frequency" in present:
+        optional_aggs += (
+            "\n                min(frequency)::DOUBLE AS frequency_min,"
+            "\n                max(frequency)::DOUBLE AS frequency_max,"
+        )
+    if "fit_gamma" in present:
+        optional_aggs += "\n                avg(fit_gamma)::DOUBLE AS fit_gamma,"
     conn.execute(
         f"""
         COPY (
             SELECT
                 sequence::BIGINT AS sequence,
                 \"group\"::BIGINT AS \"group\",
-                min(timestamp)::BIGINT AS timestamp,
-                min(frequency)::DOUBLE AS frequency_min,
-                max(frequency)::DOUBLE AS frequency_max,
+                min(timestamp)::BIGINT AS timestamp,{optional_aggs}
                 avg(fit_center)::DOUBLE AS fit_center,
-                avg(fit_gamma)::DOUBLE AS fit_gamma,
                 avg(fit_fwhm)::DOUBLE AS fit_fwhm,
                 count(*)::BIGINT AS points
             FROM read_parquet('{raw}')
@@ -148,20 +187,23 @@ def build_pyramid(conn: duckdb.DuckDBPyConnection, dest: Path) -> None:
     app responsive with 1 GB+ raw imports.
     """
     raw = _raw_glob(dest)
-    raw_columns = {
-        r[0] for r in conn.execute(
-            f"SELECT column_name FROM (DESCRIBE SELECT * FROM read_parquet('{raw}'))"
-        ).fetchall()
-    }
-    echem_present = [c for c in OPTIONAL if c in raw_columns]
+    raw_columns = _raw_columns(conn, dest)
+    echem_present = [c for c in ECHEM_OPTIONAL if c in raw_columns]
     # Aggregate the cell-level EQCM channel per bucket. cycle is monotonic over
     # time, so its bucket max is the last (integer-like) cycle index.
-    echem_select = "".join(f"\n                        {c}," for c in echem_present)
     echem_agg_parts = []
     for c in echem_present:
         agg = f"max({c})" if c == "cycle" else f"avg({c})"
         echem_agg_parts.append(f"{agg}::DOUBLE AS {c}")
     echem_agg = "".join(f"\n                    {p}," for p in echem_agg_parts)
+    # Raw-trace summaries only exist when the raw columns are present.
+    raw_agg = ""
+    if "fit_gamma" in raw_columns:
+        raw_agg += "\n                    avg(fit_gamma)::DOUBLE AS fit_gamma,"
+    if "conductance" in raw_columns:
+        raw_agg += "\n                    max(conductance)::DOUBLE AS conductance_peak,"
+    if "susceptance" in raw_columns:
+        raw_agg += "\n                    avg(susceptance)::DOUBLE AS susceptance_mean,"
     for name, bucket_us in LEVELS.items():
         out_dir = dest / "pyramid" / name
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -172,16 +214,7 @@ def build_pyramid(conn: duckdb.DuckDBPyConnection, dest: Path) -> None:
                 WITH bucketed AS (
                     SELECT
                         (floor(timestamp / {bucket_us}) * {bucket_us})::BIGINT AS bucket_ts,
-                        timestamp,
-                        \"group\",
-                        fit_center,
-                        fit_gamma,
-                        fit_fwhm,
-                        conductance,
-                        susceptance,
-                        raw_i,
-                        raw_q,{echem_select}
-                        timestamp AS _ts_keep
+                        *
                     FROM read_parquet('{raw}')
                 )
                 SELECT
@@ -190,10 +223,7 @@ def build_pyramid(conn: duckdb.DuckDBPyConnection, dest: Path) -> None:
                     avg(fit_center)::DOUBLE AS fit_center,
                     min(fit_center)::DOUBLE AS fit_center_min,
                     max(fit_center)::DOUBLE AS fit_center_max,
-                    avg(fit_fwhm)::DOUBLE AS fit_fwhm,
-                    avg(fit_gamma)::DOUBLE AS fit_gamma,
-                    max(conductance)::DOUBLE AS conductance_peak,
-                    avg(susceptance)::DOUBLE AS susceptance_mean,{echem_agg}
+                    avg(fit_fwhm)::DOUBLE AS fit_fwhm,{raw_agg}{echem_agg}
                     count(*)::BIGINT AS count
                 FROM bucketed
                 GROUP BY bucket_ts, \"group\"
@@ -210,6 +240,7 @@ def ingest(
     *,
     raw_part_rows: int = 1_000_000,
     memory_limit: str | None = "4GB",
+    source_label: str | None = None,
 ) -> Path:
     """Import parquet into an optimized run folder.
 
@@ -239,10 +270,11 @@ def ingest(
     (dest / "annotations.json").write_text("[]")
     (dest / "expressions.json").write_text("{}")
 
+    has_raw = RAW_MARKER in cols
     manifest = Manifest(
         run_id=dest.name,
         created_at=now_iso(),
-        source_path=str(source),
+        source_path=source_label or str(source),
         time=TimeInfo(start=t0, end=t1),
         columns=cols,
         groups=[int(g) for g in groups],
@@ -254,6 +286,8 @@ def ingest(
             "raw_part_rows": int(raw_part_rows),
             "rows_copied": rows_copied,
             "optimized_for_large_files": True,
+            "has_raw": has_raw,
+            "raw_columns_present": [c for c in RAW_OPTIONAL if c in cols],
         },
     )
     manifest.save(dest)

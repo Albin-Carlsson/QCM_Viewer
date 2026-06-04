@@ -10,6 +10,7 @@ from rich.table import Table
 
 from .demo import PRESETS, make_demo_data
 from .ingest import ingest
+from .profiles import import_run
 from .run import open_run
 
 app = typer.Typer(help="QCM parquet viewer CLI")
@@ -88,6 +89,39 @@ def ingest_cmd(
     )
     console.print(f"Ingested optimized run: {out}")
 
+
+
+@app.command(name="import")
+def import_cmd(
+    source: Path,
+    dest: Path,
+    overwrite: bool = typer.Option(False, "--overwrite"),
+    raw_part_rows: int = typer.Option(
+        1_000_000,
+        "--raw-part-rows",
+        help="Rows per raw parquet part written during ingest. Lower this if memory is tight.",
+    ),
+    memory_limit: str = typer.Option(
+        "4GB",
+        "--memory-limit",
+        help="DuckDB memory limit during index/pyramid build, e.g. 2GB, 4GB, 8GB.",
+    ),
+):
+    """Import a run from any supported source.
+
+    Accepts a raw QCM parquet (file or directory) or a standardized QCM csv
+    (Time_N/Fr_N/D_N), producing the same kind of run directory.
+    """
+    out = import_run(
+        source,
+        dest,
+        overwrite=overwrite,
+        raw_part_rows=raw_part_rows,
+        memory_limit=memory_limit,
+    )
+    run = open_run(out)
+    kind = "raw" if run.has_raw else "fit-only"
+    console.print(f"Imported {kind} run: {out} ({len(run.groups)} overtone channels)")
 
 
 @app.command()
