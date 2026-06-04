@@ -14,10 +14,11 @@ from __future__ import annotations
 import polars as pl
 
 from .theme import (
+    DEFAULT_PARAMS,
     DISSIPATION_SCALE,
     ELECTRODE_AREA_CM2,
     FARADAY_CONSTANT,
-    SAUERBREY_CONSTANT,
+    ExperimentParams,
     Quantity,
     quantity as get_quantity,
 )
@@ -78,11 +79,15 @@ def compute(
     orders: dict[int, int],
     baseline_df: pl.DataFrame | None = None,
     baseline_means_df: pl.DataFrame | None = None,
+    params: ExperimentParams | None = None,
 ) -> pl.DataFrame:
     """Return a tidy frame ``[timestamp, group, value]`` for the given quantity.
 
-    ``orders`` maps group -> overtone order n. For referenced quantities the
-    per-group baseline mean can be supplied two ways:
+    ``orders`` maps group -> overtone order n. ``params`` carries the editable
+    experiment parameters (Sauerbrey sensitivity and electrode area) used by the
+    mass and MPE quantities; it defaults to the standard 5 MHz / 1 cm² values.
+    For referenced quantities the per-group baseline mean can be supplied two
+    ways:
 
     - ``baseline_means_df``: a precomputed ``[group, baseline]`` frame (e.g. from
       :meth:`QCMRun.baseline_mean`), used as-is. This is the fast path — the
@@ -91,6 +96,7 @@ def compute(
 
     Without either, a referenced quantity falls back to each group's first sample.
     """
+    params = params or DEFAULT_PARAMS
     q = get_quantity(quantity_key)
     if df.is_empty():
         return df.select([*_KEEP]).with_columns(pl.lit(None, dtype=pl.Float64).alias("value"))
@@ -113,7 +119,7 @@ def compute(
         out = out.with_columns((pl.col("value") / n_expr).alias("value"))
 
     if q.kind in ("mass", "mpe"):  # Sauerbrey areal mass: m = -C * (Δf / n)
-        out = out.with_columns((-SAUERBREY_CONSTANT * pl.col("value")).alias("value"))
+        out = out.with_columns((-params.sensitivity * pl.col("value")).alias("value"))
 
     if q.kind == "mpe":
         # Mass per electron = F · d(total mass)/d(charge). Areal mass (ng/cm²) is
@@ -122,7 +128,7 @@ def compute(
         # finite difference per overtone over time; steps with no charge change
         # are left null instead of dividing by zero.
         out = out.sort(["group", "timestamp"]).with_columns(
-            (pl.col("value") * ELECTRODE_AREA_CM2 * 1e-9).alias("_mass_g")
+            (pl.col("value") * params.area_cm2 * 1e-9).alias("_mass_g")
         )
         dq = pl.col("charge").diff().over("group")
         dm = pl.col("_mass_g").diff().over("group")

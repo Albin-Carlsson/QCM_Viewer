@@ -18,7 +18,7 @@ from typing import Literal
 import panel as pn
 
 from .state import RunInfo, ViewState, parse_orders
-from .theme import AXES, QUANTITIES, quantity
+from .theme import AXES, QUANTITIES, ExperimentParams, quantity
 
 _QUANTITY_OPTIONS = {q.label: key for key, q in QUANTITIES.items()}
 _AXIS_OPTIONS = {a.label: key for key, a in AXES.items()}
@@ -75,6 +75,7 @@ class ViewerControls:
         self._last_baseline: tuple[float, float] | None = None
         self._syncing_ranges = False
         self._build_widgets()
+        self._build_param_widgets()
 
     def _build_widgets(self) -> None:
         self._time_step = max(self.info.span_s / 10_000, 0.001)
@@ -493,6 +494,7 @@ class ViewerControls:
             self.group_select,
             self.orders_text,
             *self.overtone_signal_inputs,
+            *self.param_inputs,
             self.t_range.param.value_throttled,
             self.baseline_range.param.value_throttled,
             self.annotation_version,
@@ -582,6 +584,55 @@ class ViewerControls:
     def normalized_frequency_groups(self) -> set[int]:
         return {g for g in self.info.groups if bool(self.overtone_normalize[g].value)}
 
+    # --- experiment parameters --------------------------------------------
+    def _build_param_widgets(self) -> None:
+        """Editable per-run experiment parameters, seeded from saved state."""
+        p = ExperimentParams.from_dict(self.saved.get("params"))
+        self.param_area = pn.widgets.FloatInput(
+            name="Electrode area (cm²)", value=p.area_cm2, start=1e-6, step=0.01,
+            sizing_mode="stretch_width",
+        )
+        self.param_sensitivity = pn.widgets.FloatInput(
+            name="Sauerbrey sensitivity (ng·cm⁻²·Hz⁻¹)", value=p.sensitivity, start=1e-6,
+            step=0.1, sizing_mode="stretch_width",
+        )
+        self.param_molar_mass = pn.widgets.FloatInput(
+            name="Molar mass M (g/mol)", value=p.molar_mass, start=1e-6, step=0.01,
+            sizing_mode="stretch_width",
+        )
+        self.param_valency = pn.widgets.IntInput(
+            name="Valency z", value=p.valency, start=1, step=1, sizing_mode="stretch_width",
+        )
+
+    def params(self) -> ExperimentParams:
+        d = ExperimentParams()
+        return ExperimentParams(
+            area_cm2=self._safe_float(self.param_area.value, d.area_cm2),
+            sensitivity=self._safe_float(self.param_sensitivity.value, d.sensitivity),
+            molar_mass=self._safe_float(self.param_molar_mass.value, d.molar_mass),
+            valency=max(1, int(self.param_valency.value or d.valency)),
+        )
+
+    @property
+    def param_inputs(self) -> tuple:
+        return (self.param_area, self.param_sensitivity, self.param_molar_mass, self.param_valency)
+
+    def experiment_params_panel(self) -> pn.viewable.Viewable:
+        """Editable parameter card with a live Target-MPE (= M/z) readout."""
+        def target(*_):
+            t = self.params().target_mpe
+            txt = f"{t:,.2f} g/mol" if t is not None else "—"
+            return pn.pane.HTML(
+                f"<div class='param-target'><b>Target MPE (M / z):</b> {txt}</div>", margin=0,
+            )
+        return pn.Card(
+            self.param_area, self.param_sensitivity, self.param_molar_mass, self.param_valency,
+            pn.bind(target, *self.param_inputs),
+            title="Experiment parameters",
+            collapsible=True, collapsed=True, margin=0, sizing_mode="stretch_width",
+            css_classes=["experiment-params"],
+        )
+
     def state(self) -> ViewState:
         # The sliders are the canonical source of truth; numeric inputs are kept
         # synchronized with them and are included in ``signal_inputs`` only to
@@ -601,6 +652,7 @@ class ViewerControls:
             annotation_label=self.region_label.value,
             annotation_version=int(self.annotation_version.value),
             overtone_controls=self.overtone_controls_state(),
+            params=self.params(),
         )
 
     def _safe_float(self, value, fallback: float) -> float:

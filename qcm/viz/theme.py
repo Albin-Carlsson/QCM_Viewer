@@ -49,6 +49,62 @@ ELECTRODE_AREA_CM2 = 1.0
 
 
 @dataclass(frozen=True)
+class ExperimentParams:
+    """Editable per-run experiment parameters for mass/MPE calculations.
+
+    These replace hardcoded science constants so a run can describe its own
+    sensor and deposited species:
+
+    - ``area_cm2``: electrode area (cm²); converts areal mass to total mass and
+      current to current density.
+    - ``sensitivity``: Sauerbrey integral sensitivity (ng cm⁻² Hz⁻¹). Drives both
+      Sauerbrey areal mass and the MPE mass term so the two stay consistent.
+    - ``molar_mass``: molar mass M of the deposited species (g/mol).
+    - ``valency``: number of electrons z transferred per deposited atom.
+
+    The theoretical mass-per-electron target is ``M / z`` (g/mol) — e.g. zinc
+    (65.38 / 2 = 32.69).
+    """
+
+    area_cm2: float = ELECTRODE_AREA_CM2
+    sensitivity: float = SAUERBREY_CONSTANT
+    molar_mass: float = 65.38   # zinc, the notebook's default species
+    valency: int = 2
+
+    @property
+    def target_mpe(self) -> float | None:
+        """Theoretical MPE (g/mol) = molar mass / valency, or None if z is 0."""
+        return self.molar_mass / self.valency if self.valency else None
+
+    def to_dict(self) -> dict:
+        return {
+            "area_cm2": self.area_cm2,
+            "sensitivity": self.sensitivity,
+            "molar_mass": self.molar_mass,
+            "valency": self.valency,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict | None) -> "ExperimentParams":
+        """Build params from a (possibly partial) persisted dict, ignoring junk."""
+        if not isinstance(data, dict):
+            return cls()
+        d = cls()
+        try:
+            return cls(
+                area_cm2=float(data.get("area_cm2", d.area_cm2)),
+                sensitivity=float(data.get("sensitivity", d.sensitivity)),
+                molar_mass=float(data.get("molar_mass", d.molar_mass)),
+                valency=int(data.get("valency", d.valency)),
+            )
+        except (TypeError, ValueError):
+            return d
+
+
+DEFAULT_PARAMS = ExperimentParams()
+
+
+@dataclass(frozen=True)
 class Quantity:
     """A plottable physical quantity derived from the sweep-fit columns."""
 
