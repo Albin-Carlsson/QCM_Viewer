@@ -74,6 +74,38 @@ def test_mid_cycle_start_does_not_corrupt():
     assert not stats.is_empty()
 
 
+def _joined_half_cycle():
+    """One cycle: plating mass 0→20000 ng (charge 0→-0.06 C), stripping back to 6000."""
+    return pl.DataFrame({
+        "timestamp": [0, 1, 2, 3, 4, 5],
+        "cycle": [1, 1, 1, 1, 1, 1],
+        "_is_plate": [True, True, True, False, False, False],
+        "charge": [0.0, -0.03, -0.06, -0.06, -0.03, 0.0],
+        "_mass": [0.0, 10_000.0, 20_000.0, 20_000.0, 13_000.0, 6_000.0],
+    })
+
+
+def test_half_cycle_mpe_matches_faraday_slope():
+    F = 96485.33212
+    out = echem.half_cycle_mpe(_joined_half_cycle(), area=1.0)
+    row = out.filter(pl.col("cycle") == 1).to_dicts()[0]
+    exp_plate = round(F * (20_000 - 0) * 1e-9 / (-0.06), 2)
+    exp_strip = round(F * (6_000 - 20_000) * 1e-9 / (0.06), 2)
+    assert abs(row["MPE_plating_g_per_mol"] - exp_plate) < 1e-6
+    assert abs(row["MPE_stripping_g_per_mol"] - exp_strip) < 1e-6
+
+
+def test_half_cycle_mpe_scales_with_area():
+    a1 = echem.half_cycle_mpe(_joined_half_cycle(), area=1.0)["MPE_plating_g_per_mol"][0]
+    a2 = echem.half_cycle_mpe(_joined_half_cycle(), area=2.0)["MPE_plating_g_per_mol"][0]
+    assert abs(a2 - 2 * a1) < 1e-6
+
+
+def test_half_cycle_mpe_without_halves_is_empty():
+    no_half = _joined_half_cycle().drop("_is_plate")
+    assert echem.half_cycle_mpe(no_half).is_empty()
+
+
 def test_cv_cycle_stats_has_no_ce_columns():
     # CV uses the recorded cycle column and gets no CE columns.
     n = 40
