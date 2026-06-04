@@ -248,6 +248,24 @@ def half_cycle_mpe(joined: pl.DataFrame, area: float = ELECTRODE_AREA_CM2) -> pl
     return plating.join(stripping, on="cycle", how="full", coalesce=True).sort("cycle")
 
 
+def cycle_relative(df: pl.DataFrame, *, zero: bool = False) -> pl.DataFrame:
+    """Re-reference rows to each cycle's own start for overlay comparison.
+
+    ``df`` carries ``timestamp``, ``cycle``, and ``value``. Adds ``t_rel_s`` =
+    seconds since the cycle's first sample (so every cycle starts at 0). When
+    ``zero`` is set, ``value`` is also shifted to start at 0 within each cycle —
+    used for frequency/dissipation, never for an absolute signal like potential.
+    """
+    if df.is_empty() or "cycle" not in df.columns or "timestamp" not in df.columns:
+        return df
+    out = df.sort(["cycle", "timestamp"]).with_columns(
+        ((pl.col("timestamp") - pl.col("timestamp").min().over("cycle")) / 1_000_000).alias("t_rel_s")
+    )
+    if zero and "value" in out.columns:
+        out = out.with_columns((pl.col("value") - pl.col("value").first().over("cycle")).alias("value"))
+    return out
+
+
 def cycle_values(df: pl.DataFrame) -> list[int]:
     """Sorted distinct cycle indices present in the data."""
     if df.is_empty() or "cycle" not in df.columns:

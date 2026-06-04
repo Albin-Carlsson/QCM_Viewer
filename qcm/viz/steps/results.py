@@ -74,11 +74,13 @@ class ResultsStep(BaseStep):
             name="Cycle range", start=c_lo, end=max(c_hi, c_lo), value=(c_lo, max(c_hi, c_lo)),
             step=1, sizing_mode="stretch_width",
         )
+        self.cycle_zero = pn.widgets.Checkbox(name="Zero f/D at cycle start", value=True)
 
     # --- inputs ------------------------------------------------------------
     @property
     def _cycle_inputs(self) -> tuple:
-        return (self.technique_select, self.cycle_mode, self.cycle_select, self.cycle_range)
+        return (self.technique_select, self.cycle_mode, self.cycle_select, self.cycle_range,
+                self.cycle_zero)
 
     def _technique(self) -> str:
         choice = self.technique_select.value
@@ -261,6 +263,36 @@ class ResultsStep(BaseStep):
         except Exception:
             return stats
 
+    def cycle_overlay_plot(self, height: int = PLOT_HEIGHT):
+        """Overlay the selected cycles of the chosen quantity on a common origin."""
+        try:
+            if not self.data.has_echem():
+                return self.empty_state("No electrochemistry channel.")
+            state = self.controls.state()
+            q = quantity(state.quantity)
+            full = replace(state, t_range_s=(0.0, float(self.data.info.span_s)))
+            vdf, _ = self.data.value_df(full, state.quantity, "time")
+            cyc = self._cycle_source().select(["timestamp", "cycle"]).unique(subset=["timestamp"])
+            if vdf.is_empty() or cyc.is_empty() or "cycle" not in cyc.columns:
+                return self.empty_state("No cycles to overlay.")
+            joined = vdf.join(cyc, on="timestamp", how="inner")
+            joined = echem.filter_cycles(
+                joined, self.cycle_mode.value,
+                cycle=int(self.cycle_select.value),
+                lo=int(self.cycle_range.value[0]), hi=int(self.cycle_range.value[1]),
+            )
+            if state.groups:
+                joined = joined.filter(pl.col("group") == state.groups[0])
+            # Zeroing only makes sense for shift-like resonance quantities, never
+            # for an absolute signal such as potential.
+            zero = bool(self.cycle_zero.value) and q.kind in ("frequency", "dissipation", "mass")
+            rel = echem.cycle_relative(joined.select(["timestamp", "cycle", "value"]), zero=zero)
+            title = f"{q.label} per cycle" + (" · zeroed at start" if zero else "")
+            return self.nearest_hover(self.force_plot_height(
+                plots.cycle_overlay(rel, q, title, height=height), height))
+        except Exception as exc:  # pragma: no cover
+            return pn.pane.Alert(f"Cycle overlay failed: {exc}", alert_type="danger")
+
     def per_cycle_table(self):
         try:
             if not self.data.has_echem():
@@ -376,6 +408,8 @@ class ResultsStep(BaseStep):
                            title="Current density vs potential"),
                 margin=0, sizing_mode="stretch_width", css_classes=["qcm-results-plotrow"],
             ),
+            self.panel(lambda: self.cycle_overlay_plot(), *sig, *cyc, self.controls.plot_reset_version,
+                       title="Cycle overlay", controls=pn.Row(self.cycle_zero, margin=0)),
             self.panel(self.per_cycle_table, *sig, *cyc, title="Per-cycle summary"),
             margin=0, sizing_mode="stretch_width", css_classes=["qcm-page-results"],
         )
