@@ -47,6 +47,19 @@ class QCMRun:
     def groups(self) -> list[int]:
         return self.manifest.groups
 
+    @property
+    def has_raw(self) -> bool:
+        """Whether the run carries raw frequency-point data.
+
+        Fit-only runs (e.g. imported Qsoft Fr/D exports) have no raw sweeps, so
+        the sweep inspector and waterfall are unavailable. Prefer the manifest
+        flag; fall back to column presence for runs ingested before it existed.
+        """
+        flag = self.manifest.metadata.get("has_raw")
+        if flag is not None:
+            return bool(flag)
+        return "raw_i" in self.columns
+
     def overtone_orders(self) -> dict[int, int]:
         """Infer the overtone order n for each group from resonance frequencies.
 
