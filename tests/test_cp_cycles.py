@@ -1,0 +1,90 @@
+"""Tests for current-sign cycle derivation and per-cycle CE (CP)."""
+from __future__ import annotations
+
+import numpy as np
+import polars as pl
+
+from qcm.viz import echem
+
+_US = 1_000_000
+
+
+def _cp_wf(n_cycles=3, plate_n=11, strip_n=6, dt=1.0, current=1.0, lead_strip=0):
+    """CP waveform: plating (negative I) then stripping (positive I) per cycle.
+
+    plate_n/strip_n are sample counts; with dt spacing a plating half spans
+    (plate_n-1)*dt seconds. ``lead_strip`` prepends a partial stripping half so a
+    mid-cycle start can be exercised.
+    """
+    times: list[float] = []
+    cur: list[float] = []
+    t = 0.0
+    for _ in range(lead_strip):
+        times.append(t); cur.append(+current); t += dt
+    for _ in range(n_cycles):
+        for _ in range(plate_n):
+            times.append(t); cur.append(-current); t += dt
+        for _ in range(strip_n):
+            times.append(t); cur.append(+current); t += dt
+    tarr = np.array(times)
+    carr = np.array(cur)
+    charge = np.cumsum(carr * dt)
+    return pl.DataFrame({
+        "timestamp": (tarr * _US).astype(np.int64),
+        "time_s": tarr,
+        "current": carr,
+        "charge": charge,
+        "potential": np.zeros_like(tarr),
+    })
+
+
+def test_derive_cycles_numbers_plating_pairs():
+    wf = echem.derive_cycles(_cp_wf(n_cycles=3))
+    assert sorted(wf["cycle"].unique().to_list()) == [1, 2, 3]
+    # Plating rows are exactly the negative-current rows.
+    plate = wf.filter(pl.col("_is_plate"))
+    assert plate["current"].max() < 0
+    strip = wf.filter(~pl.col("_is_plate"))
+    assert strip["current"].min() > 0
+
+
+def test_derive_cycles_no_current_is_noop():
+    wf = pl.DataFrame({"timestamp": [0, 1], "time_s": [0.0, 1.0], "potential": [0.0, 0.1]})
+    assert echem.derive_cycles(wf).equals(wf)
+
+
+def test_cp_cycle_stats_has_coulombic_efficiency():
+    wf = _cp_wf(n_cycles=3, plate_n=11, strip_n=6, dt=1.0)
+    stats = echem.cycle_stats(wf, "cp")
+    for col in ("t_plate_s", "t_strip_s", "Q_plate_C", "Q_strip_C", "CE_time", "CE_charge"):
+        assert col in stats.columns
+    assert stats.height == 3
+    row = stats.sort("cycle").to_dicts()[1]  # a full middle cycle
+    assert abs(row["t_plate_s"] - 10.0) < 1e-9   # (11-1)*dt
+    assert abs(row["t_strip_s"] - 5.0) < 1e-9     # (6-1)*dt
+    assert abs(row["CE_time"] - 0.5) < 1e-9
+    assert abs(row["CE_charge"] - 0.5) < 1e-9
+
+
+def test_mid_cycle_start_does_not_corrupt():
+    # Data begins on a stripping half (no preceding plating).
+    wf = echem.derive_cycles(_cp_wf(n_cycles=2, lead_strip=4))
+    assert wf["cycle"].min() == 1            # leading strip folded into cycle 1
+    stats = echem.cycle_stats(wf, "cp")
+    assert not stats.is_empty()
+
+
+def test_cv_cycle_stats_has_no_ce_columns():
+    # CV uses the recorded cycle column and gets no CE columns.
+    n = 40
+    seq = np.arange(n)
+    cv = pl.DataFrame({
+        "timestamp": (seq * _US).astype(np.int64),
+        "time_s": seq.astype(float),
+        "current": np.sin(seq / 5.0),
+        "potential": np.cos(seq / 5.0),
+        "cycle": (seq // 20).astype(np.int64),
+    })
+    stats = echem.cycle_stats(cv, "cv")
+    assert "CE_time" not in stats.columns
+    assert stats.height == 2

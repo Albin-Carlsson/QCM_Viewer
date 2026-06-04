@@ -39,7 +39,10 @@ class ElectrochemistryStep(BaseStep):
 
     def __init__(self, controls: ViewerControls, data: QCMViewData, actions: ViewerActions):
         super().__init__(controls, data, actions)
-        cycles = echem.cycle_values(self.data.echem_waveform()) if self.data.has_echem() else []
+        _wf0 = self.data.echem_waveform() if self.data.has_echem() else pl.DataFrame()
+        if not _wf0.is_empty() and echem.detect_technique(_wf0) == "cp":
+            _wf0 = echem.derive_cycles(_wf0)
+        cycles = echem.cycle_values(_wf0)
         c_lo = cycles[0] if cycles else 0
         c_hi = cycles[-1] if cycles else 0
 
@@ -83,6 +86,8 @@ class ElectrochemistryStep(BaseStep):
         wf = self.data.echem_waveform()
         if wf.is_empty():
             return wf
+        if self.effective_technique() == "cp":
+            wf = echem.derive_cycles(wf)
         wf = echem.filter_cycles(
             wf,
             self.cycle_mode.value,

@@ -51,7 +51,7 @@ class ResultsStep(BaseStep):
 
     def __init__(self, controls, data, actions):
         super().__init__(controls, data, actions)
-        cycles = echem.cycle_values(self.data.echem_waveform()) if self.data.has_echem() else []
+        cycles = echem.cycle_values(self._cycle_source()) if self.data.has_echem() else []
         c_lo = cycles[0] if cycles else 0
         c_hi = cycles[-1] if cycles else 0
         self._has_cycles = len(cycles) > 1
@@ -86,10 +86,21 @@ class ResultsStep(BaseStep):
             return choice
         return echem.detect_technique(self.data.echem_waveform())
 
+    def _cycle_source(self) -> pl.DataFrame:
+        """Waveform with cycles populated — derived from current sign for CP."""
+        wf = self.data.echem_waveform()
+        if wf.is_empty():
+            return wf
+        if echem.detect_technique(wf) == "cp":
+            return echem.derive_cycles(wf)
+        return wf
+
     def _selected_waveform(self) -> pl.DataFrame:
         wf = self.data.echem_waveform()
         if wf.is_empty():
             return wf
+        if self._technique() == "cp":
+            wf = echem.derive_cycles(wf)
         wf = echem.filter_cycles(
             wf, self.cycle_mode.value,
             cycle=int(self.cycle_select.value),
@@ -221,13 +232,14 @@ class ResultsStep(BaseStep):
                      - pl.col(_Q).sort_by("timestamp").first()).alias("_dq"),
                 ])
                 .with_columns(
+                    pl.col("_dm_ng").round(3).alias("mass_accum_ng_cm2"),
                     pl.when(pl.col("_dq").abs() > 1e-15)
                     .then(FARADAY_CONSTANT * (pl.col("_dm_ng") * ELECTRODE_AREA_CM2 * 1e-9) / pl.col("_dq"))
                     .otherwise(None)
                     .round(2)
                     .alias("MPE_g_per_mol")
                 )
-                .select(["cycle", "MPE_g_per_mol"])
+                .select(["cycle", "mass_accum_ng_cm2", "MPE_g_per_mol"])
             )
             return stats.join(per, on="cycle", how="left")
         except Exception:
