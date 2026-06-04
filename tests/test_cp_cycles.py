@@ -107,6 +107,27 @@ def test_half_cycle_mpe_without_halves_is_empty():
     assert echem.half_cycle_mpe(no_half).is_empty()
 
 
+def test_cycle_relative_resets_time_and_value():
+    df = pl.DataFrame({
+        "timestamp": [0, 1_000_000, 2_000_000, 10_000_000, 11_000_000],
+        "cycle": [1, 1, 1, 2, 2],
+        "value": [100.0, 90.0, 80.0, 50.0, 40.0],
+    })
+    rel = echem.cycle_relative(df, zero=True)
+    c1 = rel.filter(pl.col("cycle") == 1).sort("t_rel_s")
+    c2 = rel.filter(pl.col("cycle") == 2).sort("t_rel_s")
+    assert c1["t_rel_s"][0] == 0.0 and c2["t_rel_s"][0] == 0.0   # each cycle starts at 0 s
+    assert c1["t_rel_s"][-1] == 2.0                               # 2,000,000 µs
+    assert c1["value"][0] == 0.0 and c2["value"][0] == 0.0        # zeroed at cycle start
+    assert c1["value"][-1] == -20.0                               # 80 - 100
+
+
+def test_cycle_relative_without_zero_keeps_value():
+    df = pl.DataFrame({"timestamp": [0, 1_000_000], "cycle": [1, 1], "value": [5.0, 7.0]})
+    rel = echem.cycle_relative(df, zero=False)
+    assert rel.sort("t_rel_s")["value"].to_list() == [5.0, 7.0]
+
+
 def test_cv_cycle_stats_has_no_ce_columns():
     # CV uses the recorded cycle column and gets no CE columns.
     n = 40
