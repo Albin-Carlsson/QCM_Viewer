@@ -139,6 +139,86 @@ def metadata(df: pl.DataFrame, technique: str) -> dict:
     return cp_metadata(df) if technique == "cp" else cv_metadata(df)
 
 
+def derive_cycles(wf: pl.DataFrame) -> pl.DataFrame:
+    """Add current-sign half-cycles and a derived ``cycle`` column to a waveform.
+
+    Plating is the negative-current segment, stripping the positive-current one;
+    a full cycle is a plating+stripping pair. Cycle numbering increments at each
+    plating-half start, so data that begins mid-cycle (e.g. on a stripping half)
+    is folded into cycle 1 rather than corrupting the table. Adds:
+
+    - ``_half``: contiguous same-sign segment id,
+    - ``_is_plate``: True on plating (negative-current) rows,
+    - ``cycle``: 1-based full-cycle index.
+
+    Returns the frame unchanged when there is no current channel.
+    """
+    if wf.is_empty() or "current" not in wf.columns:
+        return wf
+    order = "time_s" if "time_s" in wf.columns else "timestamp"
+    w = wf.sort(order)
+    w = w.with_columns(
+        pl.col("current").sign()
+        .replace(0, None).fill_null(strategy="forward").fill_null(strategy="backward")
+        .alias("_sgn")
+    )
+    w = w.with_columns(
+        (pl.col("_sgn") != pl.col("_sgn").shift(1)).fill_null(True).alias("_newhalf"),
+        (pl.col("_sgn") < 0).alias("_is_plate"),
+    )
+    w = w.with_columns(pl.col("_newhalf").cum_sum().alias("_half"))
+    # A new cycle starts at the beginning of each plating half; leading rows
+    # before the first plating half belong to cycle 1.
+    w = w.with_columns((pl.col("_newhalf") & pl.col("_is_plate")).cum_sum().alias("_cyc"))
+    w = w.with_columns(
+        pl.when(pl.col("_cyc") < 1).then(1).otherwise(pl.col("_cyc")).cast(pl.Int64).alias("cycle")
+    )
+    return w.drop(["_sgn", "_newhalf", "_cyc"])
+
+
+def _cp_cycle_ce(wf: pl.DataFrame) -> pl.DataFrame:
+    """Per-cycle coulombic efficiency from plating/stripping half-cycles.
+
+    Expects the ``_half``/``_is_plate``/``cycle`` markers from
+    :func:`derive_cycles`. Returns one row per cycle with plating/stripping
+    durations and charges, time-based CE (t_strip / t_plate), and charge-based
+    CE (|Q_strip / Q_plate|). Charge passed per half is ``|Δcharge|`` over that
+    half (charge is the cumulative cell charge).
+    """
+    half_aggs = [
+        pl.col("_is_plate").first().alias("is_plate"),
+        (pl.col("time_s").max() - pl.col("time_s").min()).alias("dur"),
+    ]
+    if "charge" in wf.columns:
+        half_aggs.append(
+            (pl.col("charge").sort_by("time_s").last() - pl.col("charge").sort_by("time_s").first())
+            .abs().alias("q")
+        )
+    halves = wf.group_by(["cycle", "_half"]).agg(half_aggs)
+
+    cyc_aggs = [
+        pl.col("dur").filter(pl.col("is_plate")).sum().alias("t_plate_s"),
+        pl.col("dur").filter(~pl.col("is_plate")).sum().alias("t_strip_s"),
+    ]
+    if "q" in halves.columns:
+        cyc_aggs += [
+            pl.col("q").filter(pl.col("is_plate")).sum().alias("Q_plate_C"),
+            pl.col("q").filter(~pl.col("is_plate")).sum().alias("Q_strip_C"),
+        ]
+    per = halves.group_by("cycle").agg(cyc_aggs).with_columns(
+        pl.when(pl.col("t_plate_s") > 0)
+        .then(pl.col("t_strip_s") / pl.col("t_plate_s"))
+        .otherwise(None).alias("CE_time"),
+    )
+    if "Q_plate_C" in per.columns:
+        per = per.with_columns(
+            pl.when(pl.col("Q_plate_C").abs() > 1e-15)
+            .then((pl.col("Q_strip_C") / pl.col("Q_plate_C")).abs())
+            .otherwise(None).alias("CE_charge"),
+        )
+    return per.sort("cycle")
+
+
 def cycle_values(df: pl.DataFrame) -> list[int]:
     """Sorted distinct cycle indices present in the data."""
     if df.is_empty() or "cycle" not in df.columns:
@@ -184,6 +264,13 @@ CYCLE_COLUMN_TITLES: dict[str, str] = {
     "MPE_g_per_mol": "MPE (g/mol)",
     "step_duration": "Step duration (s)",
     "n_steps": "Steps",
+    "t_plate_s": "Plating time (s)",
+    "t_strip_s": "Stripping time (s)",
+    "Q_plate_C": "Plating charge (C)",
+    "Q_strip_C": "Stripping charge (C)",
+    "CE_time": "CE (time)",
+    "CE_charge": "CE (charge)",
+    "mass_accum_ng_cm2": "Mass accumulation (ng/cm²)",
 }
 
 
@@ -206,7 +293,13 @@ def cycle_stats(df: pl.DataFrame, technique: str = "cv") -> pl.DataFrame:
     peak currents; for CP the potential window is the working range.
     """
     wf = waveform(df) if "time_s" not in df.columns else df
-    if wf.is_empty() or "cycle" not in wf.columns:
+    if wf.is_empty():
+        return pl.DataFrame()
+    # CP cycles are derived from the current sign (the instrument cycle column, if
+    # any, is overridden); CV uses the cycle column as recorded.
+    if technique == "cp" and "current" in wf.columns:
+        wf = derive_cycles(wf)
+    if "cycle" not in wf.columns:
         return pl.DataFrame()
     agg = [
         pl.len().alias("samples"),
@@ -218,9 +311,12 @@ def cycle_stats(df: pl.DataFrame, technique: str = "cv") -> pl.DataFrame:
     ]
     if "charge" in wf.columns:
         agg.append((pl.col("charge").max() - pl.col("charge").min()).alias("charge_C"))
-    return (
+    base = (
         wf.group_by("cycle")
         .agg(agg)
         .with_columns(pl.col("cycle").cast(pl.Int64))
         .sort("cycle")
     )
+    if technique == "cp" and "_half" in wf.columns:
+        base = base.join(_cp_cycle_ce(wf), on="cycle", how="left").sort("cycle")
+    return base
