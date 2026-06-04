@@ -79,7 +79,8 @@ class QCMViewData:
             # Only the per-group mean of the baseline window is needed; aggregate
             # it in SQL instead of scanning the raw window into Python.
             base_means = self._baseline_mean(science.raw_value_sql(q), b0, b1, groups)
-        out = science.compute(main, key, state.orders, baseline_means_df=base_means)
+        out = science.compute(main, key, state.orders, baseline_means_df=base_means,
+                              params=getattr(state, "params", None))
         out = self.add_elapsed(out)
         out = self._attach_x(out, ax, t0, t1, groups)
         return out, (time.perf_counter() - tic) * 1000

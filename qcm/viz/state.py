@@ -4,6 +4,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from .theme import DEFAULT_PARAMS, ExperimentParams
+
 _US = 1_000_000
 
 
@@ -44,6 +46,7 @@ class ViewState:
     annotation_label: str = ""
     annotation_version: int = 0
     overtone_controls: dict[str, dict[str, bool]] = field(default_factory=dict)
+    params: ExperimentParams = DEFAULT_PARAMS
 
     def t_us(self, t0_us: int) -> tuple[int, int]:
         start, end = self.t_range_s
