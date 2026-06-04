@@ -28,6 +28,7 @@ from .theme import (
     Quantity,
     color_for_slot,
 )
+from .tokens import CYCLE_BAND_COLOR, HEADER_BG
 
 X = ELAPSED_COLUMN
 X_LABEL = "Time [s]"
@@ -233,7 +234,7 @@ def _saved_region_label_hook(spans):
                     text=text,
                     text_font_size="9pt",
                     text_color=EVENT_COLOR,
-                    background_fill_color="#0f172a",
+                    background_fill_color=HEADER_BG,
                     background_fill_alpha=0.75,
                     border_line_alpha=0.0,
                     text_baseline="bottom",
@@ -248,7 +249,7 @@ def baseline_span(x0: float, x1: float) -> hv.VSpan:
     return hv.VSpan(x0, x1).opts(color=BASELINE_COLOR, alpha=0.10)
 
 
-_CYCLE_BAND_COLOR = "#64748b"
+_CYCLE_BAND_COLOR = CYCLE_BAND_COLOR
 
 
 def cycle_band_elements(spans) -> list:
@@ -366,14 +367,25 @@ def timeline(
     hooks = [_vline_hover_hook, _legend_mute_hook, _saved_region_label_hook(annotation_spans or [])]
     if select_x:
         hooks.append(_xbox_select_hook)
+    hooks.append(_autohide_toolbar_hook)
     return hv.Overlay(elements).opts(
         hv.opts.Overlay(
             title=title, height=height, responsive=True, legend_position="right",
+            xlabel=X_LABEL, ylabel=q.axis_label,
             active_tools=active, tools=tools,
             hooks=hooks, show_grid=True,
         ),
         hv.opts.Curve(tools=["hover"]),
     )
+
+
+def _autohide_toolbar_hook(plot, _element):
+    """Let the Bokeh tool palette appear on hover instead of always occupying
+    space at the plot's right edge — a cleaner resting state."""
+    try:
+        plot.state.toolbar.autohide = True
+    except Exception:
+        pass
 
 
 def _xy_axis(value_df: pl.DataFrame, group: int, monotonic: bool, max_points: int = MAX_PLOT_POINTS):
@@ -511,9 +523,11 @@ def analysis_timeline(
         hooks.append(_saved_region_label_hook(annotation_spans or []))
         if select_x:
             hooks.append(_xbox_select_hook)
+    hooks.append(_autohide_toolbar_hook)
     return hv.Overlay(elements).opts(
         hv.opts.Overlay(
             title=title, height=height, responsive=True, legend_position="right",
+            xlabel=ax.axis_label, ylabel=q.axis_label,
             show_legend=show_legend,
             active_tools=active, tools=tools, hooks=hooks, show_grid=True,
         ),

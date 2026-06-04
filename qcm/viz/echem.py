@@ -170,6 +170,34 @@ def filter_cycles(
     return df
 
 
+# Human-readable column titles for the per-cycle table (the raw frame keeps
+# machine names so keys/sorting stay stable; these are display-only).
+CYCLE_COLUMN_TITLES: dict[str, str] = {
+    "cycle": "Cycle",
+    "samples": "Samples",
+    "duration_s": "Duration (s)",
+    "E_min_V": "E min (V)",
+    "E_max_V": "E max (V)",
+    "I_anodic_A": "I anodic (A)",
+    "I_cathodic_A": "I cathodic (A)",
+    "charge_C": "Charge (C)",
+    "MPE_g_per_mol": "MPE (g/mol)",
+    "step_duration": "Step duration (s)",
+    "n_steps": "Steps",
+}
+
+
+def pretty_column_titles(columns) -> dict[str, str]:
+    """Map raw cycle-table column names to display titles for ``Tabulator(titles=...)``.
+
+    Unknown columns fall back to a sensible ``snake_case`` → ``Title case``.
+    """
+    out: dict[str, str] = {}
+    for c in columns:
+        out[c] = CYCLE_COLUMN_TITLES.get(c) or c.replace("_", " ").strip().capitalize()
+    return out
+
+
 def cycle_stats(df: pl.DataFrame, technique: str = "cv") -> pl.DataFrame:
     """Per-cycle summary table for the selected cycles.
 

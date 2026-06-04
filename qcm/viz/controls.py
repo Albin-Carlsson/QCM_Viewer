@@ -35,71 +35,9 @@ _REGION_TYPES = {
     "Note / observation": "note",
 }
 
-_CHANNEL_TOGGLE_CSS = """
-.bk-btn-group {
-  display: grid !important;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)) !important;
-  gap: 6px !important;
-  width: 100% !important;
-}
-.bk-btn {
-  width: 100% !important;
-  justify-content: flex-start !important;
-  text-align: left !important;
-  white-space: normal !important;
-  border: 1px solid #cbd5e1 !important;
-  background-color: #ffffff !important;
-  background-image: none !important;
-  color: #475569 !important;
-  opacity: 1 !important;
-  box-shadow: none !important;
-}
-.bk-btn:hover {
-  border-color: #94a3b8 !important;
-  color: #0f172a !important;
-}
-.bk-btn.bk-active {
-  border-color: #2563eb !important;
-  background-color: #eff6ff !important;
-  background-image: none !important;
-  color: #1d4ed8 !important;
-  opacity: 1 !important;
-  font-weight: 700 !important;
-  box-shadow: inset 3px 0 0 #2563eb !important;
-}
-"""
-
-_RANGE_EDITOR_CSS = """
-.range-editor-card {
-  border-radius: 12px;
-}
-.range-editor-card .bk-card-header {
-  font-weight: 700;
-}
-.range-number-row {
-  gap: 8px !important;
-}
-.range-number-row .bk-input {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-.range-duration {
-  min-height: 34px;
-  display: flex;
-  align-items: center;
-}
-.range-actions {
-  gap: 8px !important;
-}
-.quantity-context {
-  border-left: 4px solid #2563eb;
-  padding-left: 10px;
-}
-.controls-muted {
-  color: #64748b;
-}
-"""
-
+# Styling for these widgets lives centrally in design.py (scoped by the
+# css_classes applied below: "channel-toggles", "range-editor-card",
+# "quantity-context", …). No per-widget stylesheets — one source of truth.
 
 RangeKind = Literal["current", "reference", "mark"]
 RangeEdge = Literal["start", "end"]
@@ -157,7 +95,6 @@ class ViewerControls:
             orientation="vertical",
             sizing_mode="stretch_width",
             css_classes=["channel-toggles"],
-            stylesheets=[_CHANNEL_TOGGLE_CSS],
         )
         self.group_select.param.watch(self._keep_one_channel_selected, "value")
         self.show_all_channels_button = pn.widgets.Button(
@@ -225,7 +162,7 @@ class ViewerControls:
         # Plain RangeSlider + explicit numeric inputs gives users both quick dragging
         # and precise entry without the cramped EditableRangeSlider boxes.
         self.t_range = pn.widgets.RangeSlider(
-            name="Current range",
+            name="Time window (s)",
             start=0.0,
             end=self.info.span_s,
             value=current_default,
@@ -258,7 +195,7 @@ class ViewerControls:
         self.t_full_range_button.on_click(self.set_full_current_range)
 
         self.baseline_range = pn.widgets.RangeSlider(
-            name="Zero/reference range",
+            name="Reference window (s)",
             start=0.0,
             end=self.info.span_s,
             value=reference_default,
@@ -291,7 +228,7 @@ class ViewerControls:
         self.baseline_full_range_button.on_click(self.set_full_reference_range)
 
         self.mark_range = pn.widgets.RangeSlider(
-            name="Mark range",
+            name="Mark window (s)",
             start=0.0,
             end=self.info.span_s,
             value=current_default,
@@ -345,9 +282,11 @@ class ViewerControls:
             name="Draw on plot",
             options={"Analysis range": "current", "Reference range": "reference", "Mark range": "mark"},
             value="current",
-            button_type="primary",
+            button_type="default",
             sizing_mode="stretch_width",
-            css_classes=["range-mode-toggle", "draw-mode-toggle"],
+            description="Choose what dragging on the plot edits: the analysis range, "
+                        "the reference (baseline) range, or a span to save as a phase.",
+            css_classes=["range-mode-toggle"],
         )
 
         # The labeled eyebrow above each toolbar cell is the visible label, so
@@ -390,11 +329,13 @@ class ViewerControls:
             sizing_mode="stretch_width",
             css_classes=["freq-display-toggle"],
         )
+        # NB: Panel's Checkbox has no `description`/tooltip, so the labels carry the
+        # meaning ("y = 0 line" rather than the cryptic "Zero line").
         self.show_phases = pn.widgets.Checkbox(
             name="Show phases", value=bool(self.saved.get("show_phases", True)),
         )
         self.zero_line = pn.widgets.Checkbox(
-            name="Zero line", value=bool(self.saved.get("zero_line", False)),
+            name="y = 0 line", value=bool(self.saved.get("zero_line", False)),
         )
         self.show_cycles = pn.widgets.Checkbox(
             name="Show cycles", value=bool(self.saved.get("show_cycles", False)),
@@ -442,7 +383,7 @@ class ViewerControls:
                 "One channel": "single group",
             },
             value=self.saved.get("sweep_mode", "selected overtones"),
-            button_type="primary",
+            button_type="default",
             sizing_mode="stretch_width",
         )
         self.group_for_single = pn.widgets.Select(
@@ -523,9 +464,11 @@ class ViewerControls:
             sizing_mode="stretch_width",
         )
         self.save_state_button = pn.widgets.Button(
-            name="Save workspace",
-            button_type="success",
+            name="Save view",
+            button_type="default",
             icon="device-floppy",
+            description="Save the current selections, axes, and ranges to this run "
+                        "so they're restored next time you open it.",
             sizing_mode="stretch_width",
         )
 
@@ -1253,7 +1196,7 @@ class ViewerControls:
         rows = []
         rows.append(
             pn.Row(
-                header("Overtone"),
+                header("Channel"),
                 header("Δf", self.overtone_frequency_all_button),
                 header("ΔD", self.overtone_dissipation_all_button),
                 header("Δf/n", self.overtone_normalize_all_button),
@@ -1262,11 +1205,13 @@ class ViewerControls:
                 css_classes=["overtone-controls-row", "overtone-controls-head"],
             )
         )
+        multi_channel = len(self.info.groups) > 1
         for slot, g in enumerate(self.info.groups):
             n = self.info.orders.get(g, 1)
+            row_label = f"Ch {slot + 1} · n={n}" if multi_channel else f"n = {n}"
             rows.append(
                 pn.Row(
-                    pn.pane.HTML(f"<span class='ot-n'>n = {n}</span>", margin=0),
+                    pn.pane.HTML(f"<span class='ot-n'>{row_label}</span>", margin=0),
                     self.overtone_frequency[g],
                     self.overtone_dissipation[g],
                     self.overtone_normalize[g],
@@ -1364,7 +1309,7 @@ class ViewerControls:
         toggles = pn.Column(
             pn.pane.HTML("<div class='eyebrow'>Display</div>", margin=0),
             pn.Row(*toggle_items, margin=0, css_classes=["qcm-tooltoggles"]),
-            margin=0, css_classes=["qcm-toolcell"],
+            margin=0, css_classes=["qcm-toolcell", "qcm-toolcell-display"],
         )
         return pn.Row(
             self._toolcell("X-axis", self.x_axis_select),
@@ -1418,20 +1363,31 @@ class ViewerControls:
         flush under the plot (drag) and this editor (precise entry) — so there is
         no read-only duplicate of Start/End.
         """
+        explainer = pn.pane.HTML(
+            "<div class='qcm-mode-help'>"
+            "<div class='r'><span class='b'>Analysis range</span>"
+            "<span>the window used for plots, statistics &amp; export.</span></div>"
+            "<div class='r'><span class='b'>Reference range</span>"
+            "<span>the baseline subtracted from Δ (referenced) signals.</span></div>"
+            "<div class='r'><span class='b'>Mark range</span>"
+            "<span>a span you can save as a labeled phase.</span></div>"
+            "<div class='tip'>Set a range three ways — drag on the plot, the slider "
+            "beneath it, or the Start / End boxes. They all edit the same window.</div>"
+            "</div>",
+            margin=0, sizing_mode="stretch_width",
+        )
         left = pn.Column(
             pn.pane.HTML("<div class='eyebrow'>Selection mode</div>", margin=0),
             self.brush_mode,
             pn.bind(self.draw_mode_status, self.brush_mode),
+            explainer,
             margin=0, sizing_mode="stretch_width", css_classes=["qcm-selmode"],
         )
+        # The editor already shows Start / End / Duration inline, so no separate
+        # duration chip here (it was a redundant readout of the same value).
         right = pn.Column(
             pn.pane.HTML("<div class='eyebrow'>Selected range</div>", margin=0),
             self.active_range_editor(quantity_key=self.quantity_select, with_slider=False),
-            pn.bind(self.duration_readout,
-                    self.brush_mode,
-                    self.t_range.param.value_throttled,
-                    self.baseline_range.param.value_throttled,
-                    self.mark_range.param.value_throttled),
             margin=0, sizing_mode="stretch_width", css_classes=["qcm-selread-col"],
         )
         return pn.Column(

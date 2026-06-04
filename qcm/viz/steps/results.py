@@ -57,8 +57,8 @@ class ResultsStep(BaseStep):
         self._has_cycles = len(cycles) > 1
 
         self.technique_select = pn.widgets.RadioButtonGroup(
-            name="", options={"Auto": "auto", "Cyclic voltammetry": "cv", "Chronopotentiometry": "cp"},
-            value="auto", button_type="primary", sizing_mode="stretch_width",
+            name="", options={"Auto": "auto", "CV": "cv", "CP": "cp"},
+            value="auto", button_type="default", sizing_mode="stretch_width",
             css_classes=["echem-technique-toggle"],
         )
         self.cycle_mode = pn.widgets.RadioButtonGroup(
@@ -128,16 +128,16 @@ class ResultsStep(BaseStep):
             m = self._means(state)
             cells = [
                 icon_stat("Mean Δf/n", self._fmt(m.get("df_n"), 2, " Hz"), icon="frequency"),
-                icon_stat("Mean ΔD", self._fmt(m.get("dD"), 3, " ×10⁻⁶"), icon="dissipation", tone="accent"),
-                icon_stat("Mass (Sauerbrey)", self._fmt(m.get("mass"), 1, " ng/cm²"), icon="mass", tone="success"),
+                icon_stat("Mean ΔD", self._fmt(m.get("dD"), 3, " ×10⁻⁶"), icon="dissipation"),
+                icon_stat("Mass (Sauerbrey)", self._fmt(m.get("mass"), 1, " ng/cm²"), icon="mass"),
             ]
             if self.data.has_echem():
                 charge = m.get("charge")
                 jdens = m.get("jdens")
                 cells += [
                     icon_stat("Charge", self._fmt(None if charge is None else charge * 1e3, 3, " mC"), icon="charge"),
-                    icon_stat("MPE", self._fmt(m.get("mpe"), 1, " g/mol"), icon="mpe", tone="danger"),
-                    icon_stat("Current density", self._fmt(None if jdens is None else jdens * 1e3, 2, " mA/cm²"), icon="density", tone="success"),
+                    icon_stat("MPE", self._fmt(m.get("mpe"), 1, " g/mol"), icon="mpe"),
+                    icon_stat("Current density", self._fmt(None if jdens is None else jdens * 1e3, 2, " mA/cm²"), icon="density"),
                 ]
             return stat_grid(cells)
         except Exception as exc:  # pragma: no cover
@@ -152,7 +152,7 @@ class ResultsStep(BaseStep):
             meta = echem.metadata(self.data.echem_waveform(), technique)
             if technique == "cp":
                 rows = [
-                    ("Technique", "Chronopotentiometry (CP)"),
+                    ("Technique", "Chronopotentiometry"),
                     ("Applied current", self._fmt(meta.get("applied_current", 0) * 1e6, 2, " µA")),
                     ("Applied current density", self._fmt(meta.get("applied_current_density", 0) * 1e6, 2, " µA/cm²")),
                     ("Step duration (median)", self._fmt(meta.get("step_duration"), 2, " s")),
@@ -160,7 +160,7 @@ class ResultsStep(BaseStep):
                 ]
             else:
                 rows = [
-                    ("Technique", "Cyclic voltammetry (CV)"),
+                    ("Technique", "Cyclic voltammetry"),
                     ("E start", self._fmt(meta.get("e_start"), 3, " V")),
                     ("E vertex 1", self._fmt(meta.get("e_vertex1"), 3, " V")),
                     ("E vertex 2", self._fmt(meta.get("e_vertex2"), 3, " V")),
@@ -169,8 +169,9 @@ class ResultsStep(BaseStep):
                 ]
             table = pl.DataFrame(rows, schema=["Property", "Value"], orient="row")
             return pn.widgets.Tabulator(
-                table.to_pandas(), height=212, layout="fit_data_fill",
-                show_index=False, sizing_mode="stretch_width", disabled=True,
+                table.to_pandas(), height=212, layout="fit_columns",
+                widths={"Property": 96}, show_index=False,
+                sizing_mode="stretch_width", disabled=True,
                 css_classes=["summary-table", "echem-metadata-table"],
             )
         except Exception as exc:  # pragma: no cover
@@ -247,6 +248,7 @@ class ResultsStep(BaseStep):
                 stats.to_pandas(),
                 height=min(320, max(120, 40 + stats.height * 28)),
                 layout="fit_data_fill", show_index=False,
+                titles=echem.pretty_column_titles(stats.columns),
                 sizing_mode="stretch_width", disabled=True,
                 css_classes=["summary-table"],
             )
@@ -313,20 +315,6 @@ class ResultsStep(BaseStep):
             )
 
         cyc = self._cycle_inputs
-        main = pn.Column(
-            self.panel(self.summary_cards, *sig, title="Summary (current analysis range)"),
-            self.panel(lambda: self.primary_echem_plot(), *sig, *cyc, self.controls.plot_reset_version,
-                       title="Electrochemistry"),
-            pn.Row(
-                self.panel(lambda: self.mass_vs_potential(), *sig, self.controls.plot_reset_version,
-                           title="Mass vs potential"),
-                self.panel(lambda: self.density_vs_potential(), *sig, *cyc, self.controls.plot_reset_version,
-                           title="Current density vs potential"),
-                margin=0, sizing_mode="stretch_width", css_classes=["qcm-results-plotrow"],
-            ),
-            self.panel(self.per_cycle_table, *sig, *cyc, title="Per-cycle summary"),
-            margin=0, sizing_mode="stretch_width", css_classes=["qcm-results-main"],
-        )
         side = pn.Column(
             pn.Card(
                 self.technique_select,
@@ -341,4 +329,25 @@ class ResultsStep(BaseStep):
             ),
             margin=0, sizing_mode="stretch_width", css_classes=["qcm-results-side"],
         )
-        return pn.Row(main, side, margin=0, sizing_mode="stretch_width", css_classes=["qcm-page-results"])
+        # KPI strip across the top (tiles fill one full-width row), then the tall
+        # headline plot sits beside the short Technique/Cycle controls so their
+        # heights match (no dead column), and the detail plots + table span the
+        # full width below.
+        return pn.Column(
+            self.panel(self.summary_cards, *sig, title="Summary (current analysis range)"),
+            pn.Row(
+                self.panel(lambda: self.primary_echem_plot(), *sig, *cyc, self.controls.plot_reset_version,
+                           title="Electrochemistry"),
+                side,
+                margin=0, sizing_mode="stretch_width", css_classes=["qcm-results-midrow"],
+            ),
+            pn.Row(
+                self.panel(lambda: self.mass_vs_potential(height=PLOT_HEIGHT), *sig, self.controls.plot_reset_version,
+                           title="Mass vs potential"),
+                self.panel(lambda: self.density_vs_potential(height=PLOT_HEIGHT), *sig, *cyc, self.controls.plot_reset_version,
+                           title="Current density vs potential"),
+                margin=0, sizing_mode="stretch_width", css_classes=["qcm-results-plotrow"],
+            ),
+            self.panel(self.per_cycle_table, *sig, *cyc, title="Per-cycle summary"),
+            margin=0, sizing_mode="stretch_width", css_classes=["qcm-page-results"],
+        )

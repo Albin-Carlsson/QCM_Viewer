@@ -8,20 +8,24 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 # --- look and feel -----------------------------------------------------------
-
-ACCENT = "#2563eb"
-HEADER_BG = "#0f172a"
-# Standardized plot sizing. Keep all plot dimensions here so pages stay consistent.
-HERO_HEIGHT = 380          # full-run QCM-D overview/reference plots; compact enough for one-screen pages
-PLOT_HEIGHT = 340           # main analysis timelines
-COMPACT_PLOT_HEIGHT = 220   # secondary/fingerprint plots
-RESULTS_PLOT_HEIGHT = 420   # the single headline plot on the Results page
-SWEEP_PANEL_HEIGHT = 260    # one raw sweep panel
-WATERFALL_PANEL_HEIGHT = 320
-
-# Compact workbench spacing
-SECTION_GAP = 8
-CARD_PADDING = 8
+# The visual identity lives in tokens.py (the single source of truth). These are
+# re-exported here so existing ``from .theme import …`` call sites keep working.
+from .tokens import (  # noqa: F401  (re-export)
+    ACCENT,
+    BASELINE_COLOR,
+    CARD_PADDING,
+    COMPACT_PLOT_HEIGHT,
+    EVENT_COLOR,
+    HEADER_BG,
+    HERO_HEIGHT,
+    OVERTONE_PALETTE,
+    PLOT_HEIGHT,
+    RESULTS_PLOT_HEIGHT,
+    SECTION_GAP,
+    SWEEP_PANEL_HEIGHT,
+    WATERFALL_PANEL_HEIGHT,
+    color_for_slot,
+)
 
 # Max points sent to the browser *per line*. Pyramid frames can carry tens of
 # thousands of points per group when the sweep rate is high; a plot is ~1200px
@@ -30,22 +34,7 @@ CARD_PADDING = 8
 # envelope (see plots._decimate_xy) so spikes/artifacts survive the downsample.
 MAX_PLOT_POINTS = 2000
 
-# Reference-region (baseline) and event annotation colors.
-BASELINE_COLOR = "#22c55e"
-EVENT_COLOR = "#f97316"
-
-# Colorblind-safe line colors (Wong palette) assigned by overtone slot.
-OVERTONE_PALETTE = [
-    "#56b4e9",  # sky blue
-    "#e69f00",  # orange
-    "#009e73",  # bluish green
-    "#cc79a7",  # reddish purple
-    "#f0e442",  # yellow
-    "#0072b2",  # blue
-    "#d55e00",  # vermillion
-    "#999999",  # grey
-]
-
+# --- science constants -------------------------------------------------------
 # Dissipation is dimensionless; QCM-D convention reports it in units of 1e-6.
 DISSIPATION_SCALE = 1e6
 
@@ -57,11 +46,6 @@ SAUERBREY_CONSTANT = 17.7
 # total mass for the mass-per-electron (MPE) Faraday slope.
 FARADAY_CONSTANT = 96_485.332_12
 ELECTRODE_AREA_CM2 = 1.0
-
-
-def color_for_slot(slot: int) -> str:
-    """Stable color for the n-th selected overtone."""
-    return OVERTONE_PALETTE[slot % len(OVERTONE_PALETTE)]
 
 
 @dataclass(frozen=True)

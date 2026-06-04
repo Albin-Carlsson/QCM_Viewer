@@ -11,6 +11,7 @@ import polars as pl
 from .. import plots
 from .. import science  # noqa: F401  (kept for parity; used by subclasses)
 from ..theme import HERO_HEIGHT, axis, quantity
+from ..tokens import FAINT, INK_SOFT
 from ..actions import ViewerActions
 from ..components import empty_state
 from ..controls import ViewerControls
@@ -178,7 +179,7 @@ class BaseStep:
                 return None
             return hv.Labels(rows, kdims=["x", "y"], vdims=["label"]).opts(
                 text_font_size="8pt",
-                text_color="#334155",
+                text_color=INK_SOFT,
                 text_align="center",
                 text_baseline="bottom",
             )
@@ -359,7 +360,7 @@ class BaseStep:
             zero_w = getattr(self.controls, "zero_line", None)
             if zero_w is not None and bool(zero_w.value):
                 try:
-                    plot = plot * hv.HLine(0).opts(color="#94a3b8", line_dash="dashed", line_width=1)
+                    plot = plot * hv.HLine(0).opts(color=FAINT, line_dash="dashed", line_width=1)
                 except Exception:
                     pass
             if ax.is_time:
@@ -369,7 +370,10 @@ class BaseStep:
             # container that otherwise reverts to a default inside top-right legend,
             # which overlaps the curves on the dense main graph and reads as missing.
             try:
-                plot = plot.opts(hv.opts.Overlay(show_legend=show_legend, legend_position="right"))
+                plot = plot.opts(hv.opts.Overlay(
+                    show_legend=show_legend, legend_position="right",
+                    xlabel=ax.axis_label, ylabel=q.axis_label,
+                ))
             except Exception:
                 pass
             if ax.is_time:

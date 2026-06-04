@@ -131,12 +131,16 @@ def icon_stat(label: str, value: str, *, icon: str = "info", tone: str = "neutra
     """Return an HTML icon-stat cell (used inside a ``stat_grid``)."""
     safe_tone = tone if tone in {"accent", "success", "warning", "danger", "neutral"} else "neutral"
     cap = f"<div class='caption'>{escape(caption)}</div>" if caption else ""
+    # Split "6,037.6 ng/cm²" -> bold number + a small, light unit on the same
+    # baseline, so units never orphan onto their own line.
+    num, _, unit = value.partition(" ")
+    unit_html = f"<span class='unit'>{escape(unit)}</span>" if unit else ""
     return (
         f"<div class='qcm-iconstat {safe_tone}'>"
         f"<div class='qcm-iconstat-icon'>{_svg(icon)}</div>"
         "<div class='qcm-iconstat-body'>"
         f"<div class='label'>{escape(label)}</div>"
-        f"<div class='value'>{escape(value)}</div>{cap}</div></div>"
+        f"<div class='value'>{escape(num)}{unit_html}</div>{cap}</div></div>"
     )
 
 

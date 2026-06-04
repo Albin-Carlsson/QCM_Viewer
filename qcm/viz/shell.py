@@ -35,6 +35,7 @@ from .controls import ViewerControls
 from .data import QCMViewData
 from .state import RunInfo
 from .theme import ELECTRODE_AREA_CM2, HERO_HEIGHT
+from .tokens import PHASE_COLORS as _PHASE_COLORS, PHASE_DEFAULT as _PHASE_DEFAULT
 from .steps.phases import PhasesStep
 from .steps.qc_drawer import QCDrawer
 from .steps.quantify import QuantifyStep
@@ -43,19 +44,6 @@ from .steps.results import ResultsStep
 from .steps.review import ReviewStep
 
 _US = 1_000_000
-
-_PHASE_COLORS = {
-    "baseline": "#22c55e",
-    "phase": "#7c3aed",
-    "buffer": "#0ea5e9",
-    "sample": "#f59e0b",
-    "regeneration": "#ec4899",
-    "artifact": "#ef4444",
-    "exclude": "#64748b",
-    "note": "#14b8a6",
-}
-_PHASE_DEFAULT = "#7c3aed"
-
 
 class ViewerShell:
     """Assemble the three-page workbench without owning analysis behavior."""
@@ -171,8 +159,8 @@ class ViewerShell:
         return pn.Column(
             brand("QCM-D Viewer"),
             self._nav(),
-            pn.layout.Spacer(css_classes=["qcm-sidebar-spacer"]),
             self._run_info_card(),
+            pn.layout.Spacer(css_classes=["qcm-sidebar-spacer"]),
             pn.Column(help_btn, margin=0, sizing_mode="stretch_width", css_classes=["qcm-help"]),
             margin=0, css_classes=["qcm-sidebar"],
         )
@@ -185,13 +173,23 @@ class ViewerShell:
             "</div>",
             margin=0, sizing_mode="stretch_width",
         )
-        export_btn = pn.widgets.Button(name="Export", icon="download", button_type="primary")
+        export_btn = pn.widgets.Button(name="Export", icon="download", button_type="primary",
+                                       description="Build a shareable report and data export from the current view.",
+                                       sizing_mode="fixed")
         export_btn.on_click(self._go(nav.mode_index("report")))
-        inspect = pn.widgets.Button(name="Inspect raw sweeps", icon="microscope", button_type="default")
+        inspect = pn.widgets.Button(name="Inspect raw sweeps", icon="microscope", button_type="default",
+                                    description="Open the raw resonance sweeps and I/Q traces for QC.",
+                                    sizing_mode="fixed")
         inspect.on_click(self._open_drawer)
+        # Hug content so the group stays tight on the right (the shared save button
+        # otherwise inherits stretch_width from its definition).
+        self.controls.save_state_button.sizing_mode = "fixed"
+        actions = pn.Row(
+            self.controls.save_state_button, inspect, export_btn,
+            margin=0, css_classes=["qcm-topbar-actions"],
+        )
         return pn.Row(
-            info,
-            self.controls.save_state_button, export_btn, inspect,
+            info, pn.layout.HSpacer(), actions,
             margin=0, sizing_mode="stretch_width", css_classes=["qcm-topbar"],
         )
 
@@ -304,19 +302,23 @@ class ViewerShell:
 
     # =====================================================  drawer
     def _build_drawer(self):
-        close = pn.widgets.Button(name="Close ✕", button_type="default")
+        close = pn.widgets.Button(name="Close", icon="x", button_type="default")
         close.on_click(self._close_drawer)
         qc_content = pn.bind(lambda _open: self._qc.view() if _open else pn.Spacer(height=0),
                              self.drawer_open)
         panel = pn.Column(
-            pn.Row(pn.pane.HTML("<b>Raw sweep / QC inspection</b>", margin=0),
+            pn.Row(pn.pane.HTML("<div class='qcm-drawer-title'>Raw sweep · QC inspection</div>", margin=0),
                    pn.layout.HSpacer(), close, margin=0, sizing_mode="stretch_width",
                    css_classes=["qcm-drawer-header"]),
             qc_content,
             margin=0, sizing_mode="stretch_width", css_classes=["qcm-drawer"], visible=False,
         )
         self.drawer_open.link(panel, value="visible")
-        return panel
+        # A click-anywhere backdrop that dims the page and closes the drawer.
+        scrim = pn.widgets.Button(name="", css_classes=["qcm-scrim"], visible=False)
+        scrim.on_click(self._close_drawer)
+        self.drawer_open.link(scrim, value="visible")
+        return pn.Column(scrim, panel, margin=0, css_classes=["qcm-drawer-layer"])
 
     # =====================================================  assembly
     def view(self):

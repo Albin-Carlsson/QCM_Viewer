@@ -45,18 +45,19 @@ class QuantifyStep(BaseStep):
             start, end = state.t_range_s
             duration = max(0.0, float(end) - float(start))
             rows = [
-                ("Range", f"{duration:,.2f} s", f"{start:,.2f}–{end:,.2f} s"),
-                ("Mean Δf/n", self._fmt(means.get("df_n"), 2, " Hz"), ""),
-                ("Mean ΔD", self._fmt(means.get("dD"), 3, " ×10⁻⁶"), ""),
-                ("Mass", self._fmt(means.get("mass"), 1, " ng/cm²"), ""),
-                ("Mean Q", self._fmt(means.get("Q"), 0), ""),
-                ("ΔD/Δf", self._fmt(means.get("dD_per_df"), 4), ""),
+                ("Range", f"{start:,.2f}–{end:,.2f} s"),
+                ("Duration", f"{duration:,.2f} s"),
+                ("Mean Δf/n", self._fmt(means.get("df_n"), 2, " Hz")),
+                ("Mean ΔD", self._fmt(means.get("dD"), 3, " ×10⁻⁶")),
+                ("Mass", self._fmt(means.get("mass"), 1, " ng/cm²")),
+                ("Mean Q", self._fmt(means.get("Q"), 0)),
+                ("ΔD/Δf", self._fmt(means.get("dD_per_df"), 4)),
             ]
-            table = pl.DataFrame(rows, schema=["Metric", "Value", "Range"], orient="row")
+            table = pl.DataFrame(rows, schema=["Metric", "Value"], orient="row")
             return pn.widgets.Tabulator(
                 table.to_pandas(),
-                height=168,
-                layout="fit_data_fill",
+                height=232,
+                layout="fit_columns",
                 show_index=False,
                 sizing_mode="stretch_width",
                 disabled=True,

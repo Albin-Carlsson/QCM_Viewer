@@ -21,6 +21,7 @@ import polars as pl
 from .. import echem
 from ..components import empty_state, icon_stat, run_info_table, stat_grid
 from ..theme import COMPACT_PLOT_HEIGHT
+from ..tokens import COLORS, FONT, MONO
 from ._base import BaseStep
 
 _SECTIONS = ["Run information", "Statistics (current range)", "Plots", "Per-cycle summary", "Phase table"]
@@ -133,6 +134,7 @@ class ReportStep(BaseStep):
                     stats = stats.with_columns(pl.col(c).round(4))
             return pn.widgets.Tabulator(
                 stats.to_pandas(), height=170, layout="fit_data_fill",
+                titles=echem.pretty_column_titles(stats.columns),
                 show_index=False, sizing_mode="stretch_width", disabled=True, css_classes=["summary-table"],
             )
         except Exception as exc:  # pragma: no cover
@@ -203,13 +205,16 @@ class ReportStep(BaseStep):
         )
         return f"<table class='data'><thead><tr><th>Phase</th><th>Type</th><th>Time</th></tr></thead><tbody>{body}</tbody></table>"
 
-    _REPORT_CSS = """
-    body { font-family: 'Inter', system-ui, -apple-system, sans-serif; color: #0f172a; margin: 32px auto; max-width: 960px; }
-    h1 { font-size: 1.5rem; } h2 { font-size: 1.05rem; margin-top: 28px; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px; }
-    table { border-collapse: collapse; font-size: 0.86rem; } table.kv th { text-align: left; color: #64748b; padding-right: 16px; }
-    table.kv td, table.kv th { padding: 3px 8px; } table.data { width: 100%; }
-    table.data th { background: #f6f8fc; color: #334155; text-align: left; } table.data th, table.data td { border: 1px solid #e2e8f0; padding: 5px 9px; }
-    .muted { color: #94a3b8; }
+    # Standalone export, so values are inlined — but sourced from tokens.py so the
+    # exported report matches the live UI (white base, mono numerics, blue accent).
+    _REPORT_CSS = f"""
+    body {{ font-family: {FONT}; color: {COLORS['text']}; margin: 32px auto; max-width: 960px; }}
+    h1 {{ font-size: 1.5rem; }} h2 {{ font-size: 1.05rem; margin-top: 28px; border-bottom: 1px solid {COLORS['border']}; padding-bottom: 6px; }}
+    table {{ border-collapse: collapse; font-size: 0.86rem; }} table.kv th {{ text-align: left; color: {COLORS['muted']}; padding-right: 16px; }}
+    table.kv td, table.kv th {{ padding: 3px 8px; }} table.data {{ width: 100%; }}
+    table.data th {{ background: {COLORS['surface-muted']}; color: {COLORS['text-soft']}; text-align: left; }} table.data th, table.data td {{ border: 1px solid {COLORS['border']}; padding: 5px 9px; }}
+    table.data td {{ font-family: {MONO}; font-variant-numeric: tabular-nums; }}
+    .muted {{ color: {COLORS['faint']}; }}
     """
 
     def _report_html_file(self):
