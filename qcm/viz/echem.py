@@ -237,7 +237,7 @@ def half_cycle_mpe(joined: pl.DataFrame, area: float = ELECTRODE_AREA_CM2) -> pl
           - pl.col("charge").sort_by("timestamp").first()).alias("_dq")
     mpe = (
         pl.when(pl.col("_dq").abs() > 1e-15)
-        .then(FARADAY_CONSTANT * (pl.col("_dm_ng") * area * 1e-9) / pl.col("_dq"))
+        .then(-FARADAY_CONSTANT * (pl.col("_dm_ng") * area * 1e-9) / pl.col("_dq"))
         .otherwise(None).round(2)
     )
     half = joined.group_by(["cycle", "_is_plate"]).agg([dm, dq]).with_columns(mpe.alias("_mpe"))
