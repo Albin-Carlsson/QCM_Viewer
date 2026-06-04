@@ -205,11 +205,20 @@ class ResultsStep(BaseStep):
 
     # --- per-cycle table ---------------------------------------------------
     def _augment_with_mpe(self, stats: pl.DataFrame) -> pl.DataFrame:
-        """Add a per-cycle MPE column (Faraday slope of mass change vs charge)."""
+        """Add per-cycle mass accumulation and MPE columns.
+
+        MPE is the Faraday slope of areal-mass change vs charge over an interval,
+        ``F · Δm(g) / Δq``, using the run's configured electrode area. The
+        whole-cycle value is always added; for CP, the plating and stripping
+        half-cycles (from the current-sign markers) each get their own static
+        MPE column.
+        """
         try:
             if stats.is_empty() or "cycle" not in stats.columns:
                 return stats
-            full = replace(self.controls.state(), t_range_s=(0.0, float(self.data.info.span_s)))
+            state = self.controls.state()
+            area = state.params.area_cm2
+            full = replace(state, t_range_s=(0.0, float(self.data.info.span_s)))
             mdf, _ = self.data.value_df(full, "sauerbrey_mass", "time")
             if mdf.is_empty():
                 return stats
@@ -217,31 +226,38 @@ class ResultsStep(BaseStep):
             wf = self._selected_waveform()
             if wf.is_empty() or _Q not in wf.columns or "cycle" not in wf.columns:
                 return stats
-            joined = (
-                wf.select(["timestamp", pl.col("cycle").cast(pl.Int64), _Q])
-                .join(mass_ts, on="timestamp", how="inner")
-            )
+            has_half = "_is_plate" in wf.columns
+            cols = ["timestamp", pl.col("cycle").cast(pl.Int64), _Q]
+            if has_half:
+                cols.append("_is_plate")
+            joined = wf.select(cols).join(mass_ts, on="timestamp", how="inner")
             if joined.is_empty():
                 return stats
+
+            dm = (pl.col("_mass").sort_by("timestamp").last()
+                  - pl.col("_mass").sort_by("timestamp").first()).alias("_dm_ng")
+            dq = (pl.col(_Q).sort_by("timestamp").last()
+                  - pl.col(_Q).sort_by("timestamp").first()).alias("_dq")
+            mpe = (
+                pl.when(pl.col("_dq").abs() > 1e-15)
+                .then(FARADAY_CONSTANT * (pl.col("_dm_ng") * area * 1e-9) / pl.col("_dq"))
+                .otherwise(None)
+                .round(2)
+            )
+
             per = (
-                joined.group_by("cycle")
-                .agg([
-                    (pl.col("_mass").sort_by("timestamp").last()
-                     - pl.col("_mass").sort_by("timestamp").first()).alias("_dm_ng"),
-                    (pl.col(_Q).sort_by("timestamp").last()
-                     - pl.col(_Q).sort_by("timestamp").first()).alias("_dq"),
-                ])
+                joined.group_by("cycle").agg([dm, dq])
                 .with_columns(
                     pl.col("_dm_ng").round(3).alias("mass_accum_ng_cm2"),
-                    pl.when(pl.col("_dq").abs() > 1e-15)
-                    .then(FARADAY_CONSTANT * (pl.col("_dm_ng") * ELECTRODE_AREA_CM2 * 1e-9) / pl.col("_dq"))
-                    .otherwise(None)
-                    .round(2)
-                    .alias("MPE_g_per_mol")
+                    mpe.alias("MPE_g_per_mol"),
                 )
                 .select(["cycle", "mass_accum_ng_cm2", "MPE_g_per_mol"])
             )
-            return stats.join(per, on="cycle", how="left")
+            out = stats.join(per, on="cycle", how="left")
+
+            if has_half:
+                out = out.join(echem.half_cycle_mpe(joined, area), on="cycle", how="left")
+            return out
         except Exception:
             return stats
 
