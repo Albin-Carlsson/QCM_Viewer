@@ -47,6 +47,13 @@ class ViewState:
     annotation_version: int = 0
     overtone_controls: dict[str, dict[str, bool]] = field(default_factory=dict)
     params: ExperimentParams = DEFAULT_PARAMS
+    # MPE display controls (apply only to the mass-per-electron quantity).
+    mpe_smooth: bool = False
+    mpe_window: int = 51
+    mpe_clip: bool = True
+    mpe_clip_lo: float = -100.0
+    mpe_clip_hi: float = 150.0
+    mpe_target_show: bool = True
 
     def t_us(self, t0_us: int) -> tuple[int, int]:
         start, end = self.t_range_s

@@ -240,7 +240,7 @@ class ResultsStep(BaseStep):
                   - pl.col(_Q).sort_by("timestamp").first()).alias("_dq")
             mpe = (
                 pl.when(pl.col("_dq").abs() > 1e-15)
-                .then(FARADAY_CONSTANT * (pl.col("_dm_ng") * area * 1e-9) / pl.col("_dq"))
+                .then(-FARADAY_CONSTANT * (pl.col("_dm_ng") * area * 1e-9) / pl.col("_dq"))
                 .otherwise(None)
                 .round(2)
             )

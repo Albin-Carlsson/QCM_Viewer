@@ -432,6 +432,7 @@ def analysis_timeline(
     height: int = PLOT_HEIGHT,
     show_legend: bool = True,
     cycle_spans: list | None = None,
+    target: float | None = None,
 ):
     """Unified analysis plot: selected y-quantity vs selected x-axis.
 
@@ -456,6 +457,10 @@ def analysis_timeline(
         elements.extend(window_elements(window))
     if on_time and baseline is not None:
         elements.append(baseline_span(*baseline))
+    if target is not None:
+        elements.append(
+            hv.HLine(float(target)).opts(color=EVENT_COLOR, line_dash="dashed", line_width=1.6)
+        )
 
     left_curves: list = []
     if q.is_echem:
