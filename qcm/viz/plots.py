@@ -412,6 +412,39 @@ def _xy_axis(value_df: pl.DataFrame, group: int, monotonic: bool, max_points: in
     return x, y
 
 
+def cycle_overlay(frame: pl.DataFrame, q: Quantity, title: str, height: int = PLOT_HEIGHT):
+    """Overlay each selected cycle on a common cycle-time origin.
+
+    ``frame`` carries ``cycle``, ``t_rel_s`` (seconds from each cycle's start),
+    and ``value``. One curve per cycle, coloured per slot, so cycle shapes can be
+    compared directly.
+    """
+    if frame.is_empty() or "t_rel_s" not in frame.columns or "value" not in frame.columns:
+        return empty("No cycle data in selection")
+    cycles = sorted(int(c) for c in frame["cycle"].unique().drop_nulls().to_list())
+    curves = []
+    for slot, c in enumerate(cycles):
+        sub = frame.filter(pl.col("cycle") == c).sort("t_rel_s").drop_nulls(["t_rel_s", "value"])
+        if sub.is_empty():
+            continue
+        x, y = _decimate_xy(sub["t_rel_s"].to_numpy(), sub["value"].to_numpy())
+        curves.append(
+            hv.Curve((x, y), "Cycle time [s]", q.axis_label, label=f"Cycle {c}").opts(
+                color=color_for_slot(slot), line_width=1.6
+            )
+        )
+    if not curves:
+        return empty("No cycle data in selection")
+    return hv.Overlay(curves).opts(
+        hv.opts.Overlay(
+            title=title, height=height, responsive=True, legend_position="right",
+            xlabel="Cycle time [s]", ylabel=q.axis_label, show_grid=True,
+            hooks=[_autohide_toolbar_hook, _legend_mute_hook],
+        ),
+        hv.opts.Curve(tools=["hover"]),
+    )
+
+
 def analysis_timeline(
     value_df: pl.DataFrame,
     q: Quantity,
