@@ -24,6 +24,7 @@ from pathlib import Path
 
 from ..ingest import ingest
 from .pstrace_csv import attach_echem, read_pstrace_csv
+from .qsoft_txt import is_qsoft_txt, read_qsoft_txt
 from .standardized_csv import is_standardized_csv, read_standardized_csv
 
 # Canonical column order for the long-form QCM frame.
@@ -42,38 +43,42 @@ def import_run(
 ) -> Path:
     """Import any supported source into a run directory.
 
-    Parquet sources go straight through the existing raw-level ingest. A
-    standardized QCM ``.csv`` is read into the canonical frame, staged as a
-    temporary parquet, and ingested as a fit-only run that records the original
-    file as its source. When ``ps_source`` is given (only with a csv QCM
-    source), a PSTrace potentiostat export is parsed and its potential/current/
-    charge interpolated onto the QCM timestamps before ingest, producing an
-    electrochemistry run.
+    Parquet sources go straight through the existing raw-level ingest. A fitted
+    QCM source — a standardized ``.csv`` (Time_N/Fr_N/D_N) or a Qsoft ``.txt``
+    (tab-separated, decimal-comma, f{n}_/D{n}_) — is read into the canonical
+    frame, staged as a temporary parquet, and ingested as a fit-only run that
+    records the original file as its source. When ``ps_source`` is given (with a
+    fitted QCM source), a PSTrace potentiostat export is parsed and its
+    potential/current/charge interpolated onto the QCM timestamps before ingest,
+    producing an electrochemistry run.
     """
     source = Path(source)
 
     if source.is_dir() or source.suffix.lower() == ".parquet":
         if ps_source is not None:
             raise ValueError(
-                "Merging a PSTrace file is supported with a standardized QCM csv "
+                "Merging a PSTrace file is supported with a fitted QCM csv/txt "
                 "source, not a raw parquet source."
             )
         return ingest(source, dest, overwrite=overwrite,
                       raw_part_rows=raw_part_rows, memory_limit=memory_limit)
 
-    if source.suffix.lower() == ".csv" and is_standardized_csv(source):
+    suffix = source.suffix.lower()
+    if suffix == ".csv" and is_standardized_csv(source):
         frame = read_standardized_csv(source)
-        if ps_source is not None:
-            ps = read_pstrace_csv(ps_source)
-            frame = attach_echem(frame, ps, offset_s=ps_offset_s)
-        with tempfile.TemporaryDirectory() as tmp:
-            staged = Path(tmp) / "canonical.parquet"
-            frame.write_parquet(staged)
-            return ingest(staged, dest, overwrite=overwrite,
-                          raw_part_rows=raw_part_rows, memory_limit=memory_limit,
-                          source_label=str(source))
+    elif suffix == ".txt" and is_qsoft_txt(source):
+        frame = read_qsoft_txt(source)
+    else:
+        raise ValueError(
+            f"Unrecognized source format: {source}. Supported: parquet (raw runs), "
+            f"standardized QCM csv (Time_N/Fr_N/D_N), and Qsoft txt (f{{n}}_/D{{n}}_)."
+        )
 
-    raise ValueError(
-        f"Unrecognized source format: {source}. Supported: parquet (raw runs) "
-        f"and standardized QCM csv (Time_N/Fr_N/D_N)."
-    )
+    if ps_source is not None:
+        frame = attach_echem(frame, read_pstrace_csv(ps_source), offset_s=ps_offset_s)
+    with tempfile.TemporaryDirectory() as tmp:
+        staged = Path(tmp) / "canonical.parquet"
+        frame.write_parquet(staged)
+        return ingest(staged, dest, overwrite=overwrite,
+                      raw_part_rows=raw_part_rows, memory_limit=memory_limit,
+                      source_label=str(source))
