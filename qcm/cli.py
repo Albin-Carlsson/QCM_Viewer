@@ -95,6 +95,16 @@ def ingest_cmd(
 def import_cmd(
     source: Path,
     dest: Path,
+    ps: Path | None = typer.Option(
+        None,
+        "--ps",
+        help="PSTrace potentiostat csv to merge (potential/current/charge), aligned to the QCM timestamps. Standardized QCM csv source only.",
+    ),
+    ps_offset: float = typer.Option(
+        0.0,
+        "--ps-offset",
+        help="Seconds to shift the PS stream before interpolation (positive = PS later).",
+    ),
     overwrite: bool = typer.Option(False, "--overwrite"),
     raw_part_rows: int = typer.Option(
         1_000_000,
@@ -110,18 +120,22 @@ def import_cmd(
     """Import a run from any supported source.
 
     Accepts a raw QCM parquet (file or directory) or a standardized QCM csv
-    (Time_N/Fr_N/D_N), producing the same kind of run directory.
+    (Time_N/Fr_N/D_N), producing the same kind of run directory. Pass --ps with
+    a standardized csv source to merge a PSTrace potentiostat export.
     """
     out = import_run(
         source,
         dest,
+        ps_source=ps,
+        ps_offset_s=ps_offset,
         overwrite=overwrite,
         raw_part_rows=raw_part_rows,
         memory_limit=memory_limit,
     )
     run = open_run(out)
     kind = "raw" if run.has_raw else "fit-only"
-    console.print(f"Imported {kind} run: {out} ({len(run.groups)} overtone channels)")
+    echem = " + echem" if "potential" in run.columns else ""
+    console.print(f"Imported {kind}{echem} run: {out} ({len(run.groups)} overtone channels)")
 
 
 @app.command()
