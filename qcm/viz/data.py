@@ -160,6 +160,10 @@ class QCMViewData:
     def has_echem(self) -> bool:
         return echem.has_echem(self.run.columns)
 
+    def has_raw(self) -> bool:
+        """Whether raw frequency-point views (sweep inspector, waterfall) apply."""
+        return self.run.has_raw
+
     def echem_waveform(self) -> pl.DataFrame:
         """Full-run electrochemistry waveform: one row per sweep with the cell
         signals. The channel is identical across overtones, so a single group is
