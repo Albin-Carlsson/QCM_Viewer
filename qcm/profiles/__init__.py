@@ -23,6 +23,7 @@ import tempfile
 from pathlib import Path
 
 from ..ingest import ingest
+from .pstrace_csv import attach_echem, read_pstrace_csv
 from .standardized_csv import is_standardized_csv, read_standardized_csv
 
 # Canonical column order for the long-form QCM frame.
@@ -33,6 +34,8 @@ def import_run(
     source: str | Path,
     dest: str | Path,
     *,
+    ps_source: str | Path | None = None,
+    ps_offset_s: float = 0.0,
     overwrite: bool = False,
     raw_part_rows: int = 1_000_000,
     memory_limit: str | None = "4GB",
@@ -42,16 +45,27 @@ def import_run(
     Parquet sources go straight through the existing raw-level ingest. A
     standardized QCM ``.csv`` is read into the canonical frame, staged as a
     temporary parquet, and ingested as a fit-only run that records the original
-    file as its source.
+    file as its source. When ``ps_source`` is given (only with a csv QCM
+    source), a PSTrace potentiostat export is parsed and its potential/current/
+    charge interpolated onto the QCM timestamps before ingest, producing an
+    electrochemistry run.
     """
     source = Path(source)
 
     if source.is_dir() or source.suffix.lower() == ".parquet":
+        if ps_source is not None:
+            raise ValueError(
+                "Merging a PSTrace file is supported with a standardized QCM csv "
+                "source, not a raw parquet source."
+            )
         return ingest(source, dest, overwrite=overwrite,
                       raw_part_rows=raw_part_rows, memory_limit=memory_limit)
 
     if source.suffix.lower() == ".csv" and is_standardized_csv(source):
         frame = read_standardized_csv(source)
+        if ps_source is not None:
+            ps = read_pstrace_csv(ps_source)
+            frame = attach_echem(frame, ps, offset_s=ps_offset_s)
         with tempfile.TemporaryDirectory() as tmp:
             staged = Path(tmp) / "canonical.parquet"
             frame.write_parquet(staged)
