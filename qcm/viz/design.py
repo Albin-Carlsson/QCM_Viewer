@@ -89,6 +89,11 @@ html, body {
 
 .qcm-sidebar-spacer { flex: 1 1 auto; }
 .qcm-help .bk-btn { width: 100%; justify-content: flex-start; gap: var(--qcm-space-2); }
+/* the sidebar Run-info card sits on a white surface, so a hairline border is
+   invisible — give it the stronger outline so it reads as its own contained box.
+   (Targets the card's own class: Panel renders each component in its own shadow
+   root, so a `.qcm-sidebar .qcm-card` descendant rule can't reach across it.) */
+.qcm-runinfo { border-color: var(--qcm-border-strong); }
 
 /* --- content + top bar ----------------------------------------------------- */
 .qcm-content {
@@ -150,7 +155,7 @@ html, body {
 .qcm-toolbar2 {
   display: flex; gap: var(--qcm-space-3); flex-wrap: nowrap; align-items: stretch;
   border: 1px solid var(--qcm-border); background: var(--qcm-surface);
-  border-radius: var(--qcm-radius-card); padding: var(--qcm-space-2) var(--qcm-space-3);
+  border-radius: var(--qcm-radius-card); padding: var(--qcm-space-3);
 }
 .qcm-toolcell, .qcm-toolcell.grow { display: flex; flex-direction: column; gap: 3px; flex: 1 1 0; min-width: 0; }
 /* the Display checkboxes need only their own width, so let the selects take the rest */
@@ -175,7 +180,7 @@ html, body {
 .qcm-selection {
   display: flex; flex-direction: column; gap: var(--qcm-space-3);
   border: 1px solid var(--qcm-border); background: var(--qcm-surface);
-  border-radius: var(--qcm-radius-card); padding: var(--qcm-space-3) var(--qcm-space-4);
+  border-radius: var(--qcm-radius-card); padding: var(--qcm-space-3);
 }
 .qcm-selrow { display: flex; gap: var(--qcm-space-4); align-items: flex-start; flex-wrap: wrap; }
 .qcm-selrow > .qcm-selmode { flex: 2 1 420px; min-width: 0; }
@@ -298,18 +303,22 @@ html, body {
 .echem-cycle-controls { gap: var(--qcm-space-2); }
 .echem-cycle-controls .eyebrow { margin-bottom: 2px; }
 
-/* ============================================================= REPORT page */
-.qcm-page-report { display: flex; gap: var(--qcm-space-4); align-items: flex-start; }
-.qcm-page-report > * { min-width: 0; }
-.qcm-report-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: var(--qcm-space-4); }
-.qcm-report-side {
-  flex: 0 0 var(--qcm-rail-w); width: var(--qcm-rail-w); display: flex; flex-direction: column; gap: var(--qcm-space-4);
-  position: sticky; top: calc(var(--qcm-header-h) + var(--qcm-space-5)); max-height: calc(100vh - var(--qcm-space-5)); overflow-y: auto;
+/* ===================================== EXPORT page (config + export only) */
+/* The report page is a focused export console: nothing it could show is unique
+   (stats/plots/run-info all live on Data/Results + the sidebar), so it carries
+   only Configuration + Export, centered so short content reads as a panel. */
+.qcm-page-export {
+  max-width: 760px; margin: 0 auto; width: 100%;
+  display: flex; flex-direction: column; gap: var(--qcm-space-4);
 }
-.qcm-report-preview .qcm-results-plotrow { margin-top: var(--qcm-space-3); }
-.qcm-report-side .eyebrow { margin-top: var(--qcm-space-2); }
-.qcm-report-side .bk-card-body > .eyebrow:first-child { margin-top: 0; }
-.qcm-report-side .bk-btn { width: 100%; }
+.qcm-page-export > * { min-width: 0; }
+/* eyebrows separate the grouped controls within each card */
+.qcm-page-export .eyebrow { margin-top: var(--qcm-space-3); }
+.qcm-page-export .bk-card-body > .eyebrow:first-child { margin-top: 0; }
+/* small helper line under a control group (quiet, not a loud info box) */
+.qcm-export-note { color: var(--qcm-muted); font-size: var(--qcm-fs-caption); margin: 2px 0 var(--qcm-space-1); }
+/* (config checkboxes are styled via stylesheets= injected into the widget shadow
+   root — see report.py _CHECKBOX_CSS — since the boxes live in shadow DOM.) */
 
 /* ============================================== inputs / buttons / tables */
 .bk-input, .bk-input-group input, select, textarea {
@@ -428,8 +437,8 @@ button[title*="theme" i], button[aria-label*="theme" i], .theme-toggle, .pn-them
 
 /* =============================================================== responsive */
 @media (max-width: 1280px) {
-  .qcm-page-data-body, .qcm-page-report { flex-direction: column; }
-  .qcm-rail, .qcm-report-side { flex: 1 1 auto; width: 100%; position: static; max-height: none; }
+  .qcm-page-data-body { flex-direction: column; }
+  .qcm-rail { flex: 1 1 auto; width: 100%; position: static; max-height: none; }
   .qcm-results-plotrow { flex-direction: column; }
 }
 @media (max-width: 900px) {
@@ -441,5 +450,30 @@ button[title*="theme" i], button[aria-label*="theme" i], .theme-toggle, .pn-them
   .qcm-sidebar-spacer { display: none; }
   .qcm-content { padding: var(--qcm-space-3); }
   .qcm-topbar { top: var(--qcm-space-3); }
+}
+"""
+
+
+# Per-widget stylesheet that paints a filled-accent (blue) button — the same blue
+# as the brand mark (var(--qcm-accent)). Bokeh renders every Button/FileDownload in
+# its OWN shadow root with its own base.css, so the app stylesheet's .bk-btn-primary
+# rule can't reach it (that's why the topbar Export stayed Bokeh's default blue).
+# Inject this into each accent button via its `stylesheets=` param. `!important`
+# is needed here to beat Bokeh's base rules inside the same shadow root; custom
+# properties (--qcm-*) inherit across the shadow boundary so var() resolves.
+#   NB: a regular Button renders `.bk-btn-primary`, but FileDownload renders
+#   `.bk-btn-default` regardless of button_type — so target `.bk-btn` broadly.
+#   Safe because this is injected only into the specific accent widgets.
+ACCENT_BUTTON_STYLESHEET = """
+.bk-btn {
+  background: var(--qcm-accent) !important; background-image: none !important;
+  border: 1px solid var(--qcm-accent) !important; color: var(--qcm-text) !important;
+  box-shadow: none !important; font-weight: 700;
+}
+.bk-btn:hover {
+  background: var(--qcm-accent-strong) !important; border-color: var(--qcm-accent-strong) !important;
+}
+.bk-btn:active {
+  background: var(--qcm-accent-active) !important; border-color: var(--qcm-accent-active) !important;
 }
 """

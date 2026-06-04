@@ -58,8 +58,8 @@ def main() -> None:
 
             shot("01-data")
 
-            # nav: Results, Report (sidebar nav buttons carry the label text)
-            for label, name in [("Results", "02-results"), ("Report", "03-report")]:
+            # nav: Results, Export (sidebar nav buttons carry the label text)
+            for label, name in [("Results", "02-results"), ("Export", "03-report")]:
                 try:
                     page.get_by_text(label, exact=False).first.click(timeout=4000)
                     shot(name)

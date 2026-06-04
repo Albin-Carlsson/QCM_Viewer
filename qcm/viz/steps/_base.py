@@ -45,7 +45,7 @@ class BaseStep:
             children = [body, controls]
         else:
             children = [controls, body]
-        classes = ["viewer-card"]
+        classes = ["qcm-card"]
         if controls_position == "bottom":
             classes.append("plot-first-card")
         return pn.Card(

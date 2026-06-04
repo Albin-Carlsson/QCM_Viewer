@@ -19,12 +19,28 @@ import panel as pn
 import polars as pl
 
 from .. import echem
-from ..components import empty_state, icon_stat, run_info_table, stat_grid
-from ..theme import COMPACT_PLOT_HEIGHT
+from ..design import ACCENT_BUTTON_STYLESHEET
 from ..tokens import COLORS, FONT, MONO
 from ._base import BaseStep
 
 _SECTIONS = ["Run information", "Statistics (current range)", "Plots", "Per-cycle summary", "Phase table"]
+
+# CheckBoxGroup options render inside the widget's shadow root, out of reach of the
+# app stylesheet. Panel injects these rules into that shadow root so each box lines
+# up with its label and the rows sit tight (the global 34px input height otherwise
+# top-aligns the box and stretches the rows).
+_CHECKBOX_CSS = """
+.bk-input-group { display: flex; flex-direction: column; gap: 6px; }
+.bk-input-group label, .bk-input-group > div {
+  display: flex; align-items: center; gap: 8px; margin: 0; min-height: 0;
+  font-size: 13px; color: #334155;
+}
+.bk-input-group input[type="checkbox"] {
+  width: 16px; height: 16px; min-height: 0; flex: 0 0 auto; margin: 0; padding: 0;
+  accent-color: var(--qcm-accent, #4d93ff); cursor: pointer;
+}
+.bk-label { line-height: 1.3; }
+"""
 
 
 class ReportStep(BaseStep):
@@ -32,6 +48,7 @@ class ReportStep(BaseStep):
         super().__init__(controls, data, actions)
         self.include = pn.widgets.CheckBoxGroup(
             name="", options=_SECTIONS, value=list(_SECTIONS), sizing_mode="stretch_width",
+            stylesheets=[_CHECKBOX_CSS],
         )
         self.data_format = pn.widgets.Select(
             name="", options={"Parquet (.parquet)": "parquet", "CSV (.csv)": "csv"},
@@ -39,12 +56,14 @@ class ReportStep(BaseStep):
         )
         self.data_dl = pn.widgets.FileDownload(
             label="⬇ Current range data", filename="qcm_current_range.parquet",
-            callback=self._data_file, button_type="default", sizing_mode="stretch_width",
+            callback=self._data_file, button_type="primary", sizing_mode="stretch_width",
+            stylesheets=[ACCENT_BUTTON_STYLESHEET],
         )
         self.data_format.param.watch(self._on_format, "value")
         self.report_html_dl = pn.widgets.FileDownload(
             label="⬇ Download report (HTML)", filename="qcm_report.html",
             callback=self._report_html_file, button_type="primary", sizing_mode="stretch_width",
+            stylesheets=[ACCENT_BUTTON_STYLESHEET],
         )
 
     # --- data export (format-aware) ---------------------------------------
@@ -68,42 +87,6 @@ class ReportStep(BaseStep):
         buf.seek(0)
         return buf
 
-    # --- report overview ---------------------------------------------------
-    def _region_means(self, state) -> dict[str, float | None]:
-        out: dict[str, float | None] = {}
-        try:
-            summary = self.data.region_summary(state)
-            if not summary.is_empty():
-                for col in ("df_n", "dD", "mass"):
-                    if col in summary.columns:
-                        out[col] = float(summary[col].mean())
-        except Exception:
-            pass
-        return out
-
-    def report_overview(self):
-        try:
-            state = self.controls.state()
-            lo, hi = state.t_range_s
-            m = self._region_means(state)
-            cells = [
-                icon_stat("Selected range", f"{max(0.0, float(hi) - float(lo)):,.2f} s",
-                          icon="time", caption=f"{lo:,.2f} – {hi:,.2f} s"),
-                icon_stat("Mean Δf/n", self._fmt(m.get("df_n"), 2, " Hz"), icon="frequency"),
-                icon_stat("Mean ΔD", self._fmt(m.get("dD"), 3, " ×10⁻⁶"), icon="dissipation", tone="accent"),
-                icon_stat("Mass (Sauerbrey)", self._fmt(m.get("mass"), 1, " ng/cm²"), icon="mass", tone="success"),
-            ]
-            return stat_grid(cells)
-        except Exception as exc:  # pragma: no cover
-            return pn.pane.Alert(f"Overview failed: {exc}", alert_type="danger")
-
-    def overview_card(self):
-        return pn.Card(
-            pn.bind(lambda *_: self.report_overview(), *self.controls.explore_inputs),
-            title="Report overview — current analysis range", collapsible=False, margin=0,
-            sizing_mode="stretch_width", css_classes=["qcm-card"],
-        )
-
     # --- shared content ----------------------------------------------------
     def _run_info_rows(self) -> list[tuple[str, str]]:
         info = self.data.info
@@ -120,42 +103,6 @@ class ReportStep(BaseStep):
             ("Method", method),
             ("Sweeps", str(info.n_sweeps)),
         ]
-
-    def per_cycle_preview(self):
-        try:
-            if not self.data.has_echem():
-                return empty_state("No electrochemistry channel.")
-            stats = echem.cycle_stats(self.data.echem_waveform(), echem.detect_technique(self.data.echem_waveform()))
-            if stats.is_empty():
-                return empty_state("No cycles detected.")
-            stats = stats.head(4)
-            for c in stats.columns:
-                if stats[c].dtype in (pl.Float32, pl.Float64):
-                    stats = stats.with_columns(pl.col(c).round(4))
-            return pn.widgets.Tabulator(
-                stats.to_pandas(), height=170, layout="fit_data_fill",
-                titles=echem.pretty_column_titles(stats.columns),
-                show_index=False, sizing_mode="stretch_width", disabled=True, css_classes=["summary-table"],
-            )
-        except Exception as exc:  # pragma: no cover
-            return pn.pane.Alert(f"Preview failed: {exc}", alert_type="danger")
-
-    def preview_card(self):
-        plot = pn.bind(lambda *_: self.unified_anchor(window="current", height=COMPACT_PLOT_HEIGHT, show_legend=False),
-                       *self.controls.explore_inputs, self.controls.plot_reset_version)
-        return pn.Card(
-            pn.Row(
-                pn.Column(pn.pane.HTML("<div class='eyebrow'>Run information</div>", margin=0),
-                          run_info_table(self._run_info_rows()),
-                          margin=0, sizing_mode="stretch_width"),
-                pn.Column(plot, margin=0, sizing_mode="stretch_width"),
-                margin=0, sizing_mode="stretch_width", css_classes=["qcm-results-plotrow"],
-            ),
-            pn.pane.HTML("<div class='eyebrow'>Per-cycle summary (preview)</div>", margin=0),
-            pn.bind(lambda *_: self.per_cycle_preview(), *self.controls.explore_inputs),
-            title="Report preview", collapsible=False, margin=0,
-            sizing_mode="stretch_width", css_classes=["qcm-card", "qcm-report-preview"],
-        )
 
     # --- HTML report builder ----------------------------------------------
     @staticmethod
@@ -245,46 +192,46 @@ class ReportStep(BaseStep):
             buf.seek(0)
             return buf
 
-    # --- configuration / export columns -----------------------------------
-    def config_card(self):
+    # --- export console (this page's only unique job) ----------------------
+    def report_card(self):
+        """The headline artifact: pick which sections the HTML report contains,
+        then download it. Holds the page's single primary action."""
         return pn.Card(
-            pn.pane.HTML("<div class='eyebrow'>Include in report</div>", margin=0), self.include,
-            pn.pane.HTML("<div class='eyebrow'>Data export format</div>", margin=0), self.data_format,
-            title="Configuration", collapsible=False, margin=0,
+            pn.pane.HTML("<div class='eyebrow'>Sections to include</div>", margin=0),
+            self.include,
+            self.report_html_dl,
+            title="Report (HTML)", collapsible=False, margin=0,
             sizing_mode="stretch_width", css_classes=["qcm-card", "qcm-report-config"],
         )
 
-    def export_card(self):
+    def raw_exports_card(self):
+        """Region-scoped raw outputs (data file + notebook). The Region selector
+        governs both buttons, so they live together with it."""
         return pn.Card(
-            pn.pane.HTML("<div class='eyebrow'>Report</div>", margin=0),
-            self.report_html_dl,
-            pn.pane.HTML("<div class='eyebrow'>Current range data</div>", margin=0),
+            pn.pane.HTML("<div class='eyebrow'>Region</div>", margin=0),
             self.controls.marker_select,
+            pn.pane.HTML("<div class='eyebrow'>Data</div>", margin=0),
+            self.data_format,
             self.data_dl,
             pn.pane.HTML("<div class='eyebrow'>Notebook</div>", margin=0),
+            pn.pane.HTML("<div class='qcm-export-note'>Exports the analysis notebook "
+                         "for the chosen region.</div>", margin=0),
             self.actions.export_nb_dl,
-            title="Export", collapsible=False, margin=0,
+            title="Raw exports", collapsible=False, margin=0,
             sizing_mode="stretch_width", css_classes=["qcm-card", "qcm-report-export"],
         )
 
     # --- page surface ------------------------------------------------------
     def page(self):
-        """Coherent two-column report: overview + preview (main) · config + export (side)."""
-        main = pn.Column(
-            self.overview_card(),
-            self.preview_card(),
-            margin=0, sizing_mode="stretch_width", css_classes=["qcm-report-main"],
+        """A focused export console — config + export only, centered. Everything
+        else a report could show is already on the Data / Results pages and the
+        sidebar Run-info card, so it isn't restated here."""
+        return pn.Column(
+            self.report_card(),
+            self.raw_exports_card(),
+            margin=0, sizing_mode="stretch_width", css_classes=["qcm-page-export"],
         )
-        side = pn.Column(
-            self.config_card(),
-            self.export_card(),
-            margin=0, sizing_mode="stretch_width", css_classes=["qcm-report-side"],
-        )
-        return pn.Row(main, side, margin=0, sizing_mode="stretch_width", css_classes=["qcm-page-report"])
 
-    # --- legacy hooks (kept so the old shell paths still resolve) ----------
-    def anchor_plot(self):
-        return self.overview_anchor("current")
-
+    # --- legacy hook (kept so the old shell paths still resolve) -----------
     def secondary_panel(self):
-        return self.export_card()
+        return self.raw_exports_card()

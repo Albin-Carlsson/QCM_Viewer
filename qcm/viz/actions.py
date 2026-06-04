@@ -6,6 +6,7 @@ import tempfile
 
 from .controls import ViewerControls
 from .data import QCMViewData
+from .design import ACCENT_BUTTON_STYLESHEET
 from .state import RunInfo
 
 _US = 1_000_000
@@ -46,6 +47,7 @@ class ViewerActions:
             filename="qcm_region_analysis.ipynb",
             callback=self.notebook_file,
             button_type="primary",
+            stylesheets=[ACCENT_BUTTON_STYLESHEET],
             sizing_mode="stretch_width",
         )
 

@@ -23,6 +23,7 @@ import panel as pn
 
 from . import echem, nav
 from .actions import ViewerActions
+from .design import ACCENT_BUTTON_STYLESHEET
 from .components import (
     brand,
     nav_sublabel,
@@ -132,8 +133,8 @@ class ViewerShell:
         rows.append(("Sweeps", str(self.info.n_sweeps)))
         return pn.Card(
             run_info_table(rows),
-            title="Run info", collapsible=True, collapsed=False, margin=0,
-            sizing_mode="stretch_width", css_classes=["qcm-runinfo"],
+            title="Run info", collapsible=False, margin=0,
+            sizing_mode="stretch_width", css_classes=["qcm-card", "qcm-runinfo"],
         )
 
     def _nav(self):
@@ -175,6 +176,7 @@ class ViewerShell:
         )
         export_btn = pn.widgets.Button(name="Export", icon="download", button_type="primary",
                                        description="Build a shareable report and data export from the current view.",
+                                       stylesheets=[ACCENT_BUTTON_STYLESHEET],
                                        sizing_mode="fixed")
         export_btn.on_click(self._go(nav.mode_index("report")))
         inspect = pn.widgets.Button(name="Inspect raw sweeps", icon="microscope", button_type="default",
@@ -237,16 +239,17 @@ class ViewerShell:
                     when = f"{start:,.2f} s"
                 rows.append(phase_row(color, ann.label or kind.title(), when))
             return phase_list(rows)
-        edit = pn.Card(
-            pn.bind(lambda *_: self._phases.phases_table(), self.controls.annotation_version),
-            title="Edit phases", collapsible=True, collapsed=True, margin=0,
-            sizing_mode="stretch_width",
-        )
         return pn.Card(
             pn.bind(body, self.controls.annotation_version),
-            edit,
-            title="Phases", collapsible=True, collapsed=False, margin=0,
-            sizing_mode="stretch_width", css_classes=["qcm-phases-card"],
+            title="Phases", collapsible=False, margin=0,
+            sizing_mode="stretch_width", css_classes=["qcm-card", "qcm-phases-card"],
+        )
+
+    def _rail_edit_phases(self):
+        return pn.Card(
+            pn.bind(lambda *_: self._phases.phases_table(), self.controls.annotation_version),
+            title="Edit phases", collapsible=True, collapsed=True, margin=0,
+            sizing_mode="stretch_width", css_classes=["qcm-card", "qcm-editphases-card"],
         )
 
     def _rail_live_stats(self):
@@ -263,8 +266,8 @@ class ViewerShell:
                 margin=0, sizing_mode="stretch_width",
             ),
             table,
-            title="Live statistics", collapsible=True, collapsed=False, margin=0,
-            sizing_mode="stretch_width", css_classes=["qcm-stats"],
+            title="Live statistics", collapsible=False, margin=0,
+            sizing_mode="stretch_width", css_classes=["qcm-card", "qcm-stats"],
         )
 
     def _build_data_page(self):
@@ -280,6 +283,7 @@ class ViewerShell:
         rail = pn.Column(
             self._rail_signals(),
             self._rail_phases(),
+            self._rail_edit_phases(),
             self._rail_live_stats(),
             margin=0, sizing_mode="stretch_width", css_classes=["qcm-rail"],
         )

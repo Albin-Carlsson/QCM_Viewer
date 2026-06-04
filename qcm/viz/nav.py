@@ -27,7 +27,7 @@ class Mode:
 MODES: tuple[Mode, ...] = (
     Mode("data", "Data", "Explore & visualize", "chart-line"),
     Mode("results", "Results", "Mass, charge, MPE", "chart-histogram"),
-    Mode("report", "Report", "Export & report", "file-text"),
+    Mode("report", "Export", "Report, data & notebook", "download"),
 )
 
 

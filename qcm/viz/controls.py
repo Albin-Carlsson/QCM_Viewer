@@ -997,8 +997,7 @@ class ViewerControls:
         return pn.Card(
             block,
             title="Mark phase",
-            collapsible=True,
-            collapsed=False,
+            collapsible=False,
             margin=0,
             sizing_mode="stretch_width",
             css_classes=["phase-mark-card"],
@@ -1174,8 +1173,7 @@ class ViewerControls:
             self.group_select,
             self.show_all_channels_button,
             title="Channels",
-            collapsible=True,
-            collapsed=False,
+            collapsible=False,
             margin=0,
             sizing_mode="stretch_width",
             css_classes=["channel-controls"],
@@ -1223,11 +1221,10 @@ class ViewerControls:
         return pn.Card(
             *rows,
             title="Signals",
-            collapsible=True,
-            collapsed=False,
+            collapsible=False,
             margin=0,
             sizing_mode="stretch_width",
-            css_classes=["overtone-controls"],
+            css_classes=["qcm-card", "overtone-controls"],
         )
 
     def advanced_controls(self):

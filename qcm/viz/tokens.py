@@ -21,18 +21,18 @@ from __future__ import annotations
 # Keyed by the CSS token suffix (``bg`` -> ``--qcm-bg``). Order is preserved in
 # the rendered :root block.
 COLORS: dict[str, str] = {
-    "bg": "#f4f6f9",            # app canvas behind the surfaces
+    "bg": "#dde4ee",            # app canvas behind the surfaces (deeper so white cards pop)
     "surface": "#ffffff",       # cards, sidebar, topbar
-    "surface-muted": "#f5f7fa", # table stripes, inset fills
-    "border": "#e4e8ee",        # hairline dividers
-    "border-strong": "#cbd3dd", # input borders, axis lines
+    "surface-muted": "#f1f5fa", # table stripes, inset fills
+    "border": "#d3dae5",        # hairline dividers
+    "border-strong": "#c0c9d6", # input borders, axis lines
     "text": "#0f172a",          # ink
     "text-soft": "#334155",
     "muted": "#64748b",
     "faint": "#94a3b8",
-    "accent": "#2563eb",        # the one action color
-    "accent-strong": "#1d4ed8", # hover
-    "accent-active": "#1e40af", # pressed
+    "accent": "#4d93ff",        # the one action color (bright, lively blue)
+    "accent-strong": "#3b82f6", # hover
+    "accent-active": "#2563eb", # pressed
     "accent-soft": "#eff6ff",
     "on-accent": "#ffffff",     # text/icon on a filled accent surface
     "success": "#16a34a",
