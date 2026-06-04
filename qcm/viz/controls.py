@@ -76,6 +76,7 @@ class ViewerControls:
         self._syncing_ranges = False
         self._build_widgets()
         self._build_param_widgets()
+        self._build_mpe_widgets()
 
     def _build_widgets(self) -> None:
         self._time_step = max(self.info.span_s / 10_000, 0.001)
@@ -495,6 +496,7 @@ class ViewerControls:
             self.orders_text,
             *self.overtone_signal_inputs,
             *self.param_inputs,
+            *self.mpe_inputs,
             self.t_range.param.value_throttled,
             self.baseline_range.param.value_throttled,
             self.annotation_version,
@@ -633,6 +635,47 @@ class ViewerControls:
             css_classes=["experiment-params"],
         )
 
+    # --- MPE display controls ---------------------------------------------
+    def _build_mpe_widgets(self) -> None:
+        """Display controls scoped to the mass-per-electron (MPE) quantity."""
+        s = self.saved
+        self.mpe_smooth = pn.widgets.Checkbox(
+            name="Savitzky–Golay smoothing", value=bool(s.get("mpe_smooth", False)),
+        )
+        self.mpe_window = pn.widgets.IntInput(
+            name="Smoothing window", value=int(s.get("mpe_window", 51)), start=5, step=2,
+            sizing_mode="stretch_width",
+        )
+        self.mpe_clip = pn.widgets.Checkbox(
+            name="Clip outliers", value=bool(s.get("mpe_clip", True)),
+        )
+        self.mpe_clip_lo = pn.widgets.FloatInput(
+            name="Clip min (g/mol)", value=float(s.get("mpe_clip_lo", -100.0)), step=10.0,
+            sizing_mode="stretch_width",
+        )
+        self.mpe_clip_hi = pn.widgets.FloatInput(
+            name="Clip max (g/mol)", value=float(s.get("mpe_clip_hi", 150.0)), step=10.0,
+            sizing_mode="stretch_width",
+        )
+        self.mpe_target_show = pn.widgets.Checkbox(
+            name="Show target line (M / z)", value=bool(s.get("mpe_target_show", True)),
+        )
+
+    @property
+    def mpe_inputs(self) -> tuple:
+        return (self.mpe_smooth, self.mpe_window, self.mpe_clip,
+                self.mpe_clip_lo, self.mpe_clip_hi, self.mpe_target_show)
+
+    def mpe_display_panel(self) -> pn.viewable.Viewable:
+        return pn.Card(
+            pn.pane.HTML("<small>Applies to the Mass-per-electron (MPE) quantity.</small>", margin=0),
+            self.mpe_smooth, self.mpe_window,
+            self.mpe_clip, self.mpe_clip_lo, self.mpe_clip_hi,
+            self.mpe_target_show,
+            title="MPE display", collapsible=True, collapsed=True, margin=0,
+            sizing_mode="stretch_width", css_classes=["mpe-display"],
+        )
+
     def state(self) -> ViewState:
         # The sliders are the canonical source of truth; numeric inputs are kept
         # synchronized with them and are included in ``signal_inputs`` only to
@@ -653,6 +696,12 @@ class ViewerControls:
             annotation_version=int(self.annotation_version.value),
             overtone_controls=self.overtone_controls_state(),
             params=self.params(),
+            mpe_smooth=bool(self.mpe_smooth.value),
+            mpe_window=int(self.mpe_window.value or 51),
+            mpe_clip=bool(self.mpe_clip.value),
+            mpe_clip_lo=self._safe_float(self.mpe_clip_lo.value, -100.0),
+            mpe_clip_hi=self._safe_float(self.mpe_clip_hi.value, 150.0),
+            mpe_target_show=bool(self.mpe_target_show.value),
         )
 
     def _safe_float(self, value, fallback: float) -> float:

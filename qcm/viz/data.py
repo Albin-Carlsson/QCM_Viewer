@@ -81,6 +81,14 @@ class QCMViewData:
             base_means = self._baseline_mean(science.raw_value_sql(q), b0, b1, groups)
         out = science.compute(main, key, state.orders, baseline_means_df=base_means,
                               params=getattr(state, "params", None))
+        if key == "mpe":
+            clip = ((state.mpe_clip_lo, state.mpe_clip_hi)
+                    if getattr(state, "mpe_clip", False) else None)
+            out = science.smooth_clip_mpe(
+                out, clip=clip,
+                smooth=getattr(state, "mpe_smooth", False),
+                window=getattr(state, "mpe_window", 51),
+            )
         out = self.add_elapsed(out)
         out = self._attach_x(out, ax, t0, t1, groups)
         return out, (time.perf_counter() - tic) * 1000

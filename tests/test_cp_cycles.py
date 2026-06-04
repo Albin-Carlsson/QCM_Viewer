@@ -89,8 +89,9 @@ def test_half_cycle_mpe_matches_faraday_slope():
     F = 96485.33212
     out = echem.half_cycle_mpe(_joined_half_cycle(), area=1.0)
     row = out.filter(pl.col("cycle") == 1).to_dicts()[0]
-    exp_plate = round(F * (20_000 - 0) * 1e-9 / (-0.06), 2)
-    exp_strip = round(F * (6_000 - 20_000) * 1e-9 / (0.06), 2)
+    # MPE is reported as a positive magnitude (sign flipped vs the raw slope).
+    exp_plate = round(-F * (20_000 - 0) * 1e-9 / (-0.06), 2)
+    exp_strip = round(-F * (6_000 - 20_000) * 1e-9 / (0.06), 2)
     assert abs(row["MPE_plating_g_per_mol"] - exp_plate) < 1e-6
     assert abs(row["MPE_stripping_g_per_mol"] - exp_strip) < 1e-6
 
