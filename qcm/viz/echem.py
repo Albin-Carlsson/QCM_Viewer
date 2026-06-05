@@ -369,3 +369,84 @@ def cycle_stats(df: pl.DataFrame, technique: str = "cv") -> pl.DataFrame:
     if technique == "cp" and "_half" in wf.columns:
         base = base.join(_cp_cycle_ce(wf), on="cycle", how="left").sort("cycle")
     return base
+
+
+# --- multi-run overlay -----------------------------------------------------
+
+def resolve_technique(wf: pl.DataFrame, choice: str) -> str:
+    """The technique to use for a run: the forced choice, else auto-detected."""
+    return choice if choice in ("cv", "cp") else detect_technique(wf)
+
+
+def select_cycles(
+    wf: pl.DataFrame, choice: str, mode: str, *, cycle: int = 0, lo: int = 0, hi: int = 0,
+) -> pl.DataFrame:
+    """Apply the shared cycle selection to one run's waveform.
+
+    Derives CP cycles from the current sign first (so the selection is meaningful
+    even without an instrument cycle column), then restricts to the chosen
+    cycle(s). The same ``(mode, cycle, lo, hi)`` is applied to every run, which is
+    what makes a cross-run cycle comparison line up.
+    """
+    if wf.is_empty():
+        return wf
+    if resolve_technique(wf, choice) == "cp":
+        wf = derive_cycles(wf)
+    return filter_cycles(wf, mode, cycle=cycle, lo=lo, hi=hi)
+
+
+def overlay_selected_waveforms(
+    named_waveforms: list[tuple[str, pl.DataFrame]],
+    *, technique: str = "auto", mode: str = "all", cycle: int = 0, lo: int = 0, hi: int = 0,
+) -> pl.DataFrame:
+    """Selected waveforms stacked across runs, tagged with ``run``/``run_slot``.
+
+    Feeds the multi-run CV/CP plot overlay: each run's waveform has its cycles
+    derived (CP) and is restricted to the shared cycle selection, in run-set
+    order so ``run_slot`` maps to the colour family.
+    """
+    frames: list[pl.DataFrame] = []
+    for slot, (label, wf) in enumerate(named_waveforms):
+        if wf.is_empty():
+            continue
+        sel = select_cycles(wf, technique, mode, cycle=cycle, lo=lo, hi=hi)
+        if sel.is_empty():
+            continue
+        frames.append(sel.with_columns(
+            pl.lit(label).alias("run"),
+            pl.lit(slot, dtype=pl.Int32).alias("run_slot"),
+        ))
+    if not frames:
+        return pl.DataFrame()
+    return pl.concat(frames, how="diagonal_relaxed")
+
+
+def overlay_cycle_stats(
+    named_waveforms: list[tuple[str, pl.DataFrame]],
+    *, technique: str = "auto", mode: str = "all", cycle: int = 0, lo: int = 0, hi: int = 0,
+) -> pl.DataFrame:
+    """Per-cycle stats stacked across runs, tagged with ``run`` and ``run_slot``.
+
+    ``named_waveforms`` is ``[(label, raw_waveform), …]`` in run-set order, so
+    ``run_slot`` (the enumerate index) drives the colour family. Each run's
+    technique is resolved independently; the cycle selection is shared.
+
+    Stats are computed over the whole run (stable cycle numbering) and *then*
+    filtered by the selection, so the same cycle keeps its number across runs —
+    filtering the waveform first would re-derive and renumber it.
+    """
+    frames: list[pl.DataFrame] = []
+    for slot, (label, wf) in enumerate(named_waveforms):
+        if wf.is_empty():
+            continue
+        stats = cycle_stats(wf, resolve_technique(wf, technique))
+        stats = filter_cycles(stats, mode, cycle=cycle, lo=lo, hi=hi)
+        if stats.is_empty():
+            continue
+        frames.append(stats.with_columns(
+            pl.lit(label).alias("run"),
+            pl.lit(slot, dtype=pl.Int32).alias("run_slot"),
+        ))
+    if not frames:
+        return pl.DataFrame()
+    return pl.concat(frames, how="diagonal_relaxed")

@@ -88,6 +88,29 @@ class ResultsStep(BaseStep):
             return choice
         return echem.detect_technique(self.data.echem_waveform())
 
+    # --- multi-run helpers -------------------------------------------------
+    def _runset(self):
+        return getattr(self.data, "runset", None)
+
+    def _is_multi(self) -> bool:
+        rs = self._runset()
+        return rs is not None and rs.is_multi
+
+    def _named_waveforms(self) -> list[tuple[str, pl.DataFrame]]:
+        """``(label, raw waveform)`` per run, in run-set order for colour slots."""
+        rs = self._runset()
+        labels = rs.labels()
+        return [(labels[i], d.echem_waveform()) for i, d in enumerate(rs.runs)]
+
+    def _cycle_kwargs(self) -> dict:
+        return dict(
+            technique=self.technique_select.value,
+            mode=self.cycle_mode.value,
+            cycle=int(self.cycle_select.value),
+            lo=int(self.cycle_range.value[0]),
+            hi=int(self.cycle_range.value[1]),
+        )
+
     def _cycle_source(self) -> pl.DataFrame:
         """Waveform with cycles populated — derived from current sign for CP."""
         wf = self.data.echem_waveform()
@@ -155,6 +178,27 @@ class ResultsStep(BaseStep):
             return stat_grid(cells)
         except Exception as exc:  # pragma: no cover
             return pn.pane.Alert(f"Summary failed: {exc}", alert_type="danger")
+
+    def per_channel_comparison_table(self):
+        """Per-run × per-channel headline summary over the analysis range.
+
+        Only shown for a multi-run set; gives the cross-run per-channel
+        comparison alongside the active-run KPI tiles.
+        """
+        try:
+            rs = self._runset()
+            if rs is None or not rs.is_multi:
+                return pn.Spacer(height=0)
+            summary = rs.overlay_region_summary(self.controls.state())
+            if summary.is_empty():
+                return self.empty_state("No data in the current analysis range.")
+            if "run_slot" in summary.columns:
+                summary = summary.drop("run_slot")
+            order = ["run", "group", "n", "df_n", "dD", "mass", "Q", "dD_per_df"]
+            summary = summary.select([c for c in order if c in summary.columns])
+            return self._summary_tabulator(summary, order)
+        except Exception as exc:  # pragma: no cover
+            return pn.pane.Alert(f"Comparison table failed: {exc}", alert_type="danger")
 
     # --- technique metadata ------------------------------------------------
     def metadata_card(self):
@@ -297,10 +341,25 @@ class ResultsStep(BaseStep):
         try:
             if not self.data.has_echem():
                 return self.empty_state("This run has no electrochemistry channel, so per-cycle results are unavailable.")
+            if self._is_multi():
+                stats = echem.overlay_cycle_stats(self._named_waveforms(), **self._cycle_kwargs())
+                if stats.is_empty():
+                    return self.empty_state("No cycles in the current selection.")
+                # Lead with the run label; drop the colour-slot helper column.
+                if "run_slot" in stats.columns:
+                    stats = stats.drop("run_slot")
+                stats = stats.select(["run"] + [c for c in stats.columns if c != "run"])
+                return self._render_cycle_table(stats)
             stats = echem.cycle_stats(self._selected_waveform(), self._technique())
             if stats.is_empty():
                 return self.empty_state("No cycles in the current selection.")
             stats = self._augment_with_mpe(stats)
+            return self._render_cycle_table(stats)
+        except Exception as exc:  # pragma: no cover
+            return pn.pane.Alert(f"Per-cycle table failed: {exc}", alert_type="danger")
+
+    def _render_cycle_table(self, stats: pl.DataFrame):
+        try:
             for c in stats.columns:
                 if stats[c].dtype in (pl.Float32, pl.Float64):
                     stats = stats.with_columns(pl.col(c).round(6))
@@ -321,6 +380,17 @@ class ResultsStep(BaseStep):
         try:
             if not self.data.has_echem():
                 return self.empty_state("No electrochemistry channel.")
+            if self._is_multi():
+                frame = echem.overlay_selected_waveforms(self._named_waveforms(), **self._cycle_kwargs())
+                if self._technique() == "cp":
+                    plot = plots.echem_overlay(frame, _T, _E, _T_LABEL, _E_LABEL,
+                                               "Potential vs time (CP) · all runs",
+                                               by_cycle=False, monotonic=True, height=height)
+                else:
+                    plot = plots.echem_overlay(frame, _E, _I, _E_LABEL, _I_LABEL,
+                                               "Current vs potential (CV) · all runs",
+                                               by_cycle=True, monotonic=False, height=height)
+                return self.nearest_hover(self.force_plot_height(plot, height))
             wf = self._selected_waveform()
             if self._technique() == "cp":
                 plot = plots.echem_curve(wf, _T, _E, _T_LABEL, _E_LABEL, "Potential vs time (CP)",
@@ -354,6 +424,15 @@ class ResultsStep(BaseStep):
         try:
             if not self.data.has_echem():
                 return self.empty_state("No electrochemistry channel.")
+            if self._is_multi():
+                area = self.controls.state().params.area_cm2
+                frame = echem.overlay_selected_waveforms(self._named_waveforms(), **self._cycle_kwargs())
+                if not frame.is_empty() and _I in frame.columns:
+                    frame = frame.with_columns((pl.col(_I) / area).alias(_J))
+                plot = plots.echem_overlay(frame, _E, _J, _E_LABEL, _J_LABEL,
+                                           "Current density vs potential · all runs",
+                                           by_cycle=True, monotonic=False, height=height)
+                return self.nearest_hover(self.force_plot_height(plot, height))
             wf = self._selected_waveform()
             plot = plots.echem_curve(wf, _E, _J, _E_LABEL, _J_LABEL, "Current density vs potential",
                                      by_cycle=True, monotonic=False, height=height,
@@ -365,14 +444,16 @@ class ResultsStep(BaseStep):
     # --- page surface ------------------------------------------------------
     def page(self):
         sig = self.controls.explore_inputs
+        rv = self.controls.runset_version
         if not self.data.has_echem():
             # QCM-only run: headline cards + one big mass-vs-time plot.
-            return pn.Column(
-                self.panel(self.summary_cards, *sig, title="Summary (current analysis range)"),
-                self.panel(lambda: self.mass_vs_potential(height=RESULTS_PLOT_HEIGHT),
-                           *sig, self.controls.plot_reset_version, title="Mass vs time"),
-                margin=0, sizing_mode="stretch_width", css_classes=["qcm-page-results"],
-            )
+            children = [self.panel(self.summary_cards, *sig, rv, title="Summary (current analysis range)")]
+            if self._is_multi():
+                children.append(self.panel(self.per_channel_comparison_table, *sig, rv,
+                                           title="Per-channel comparison (all runs)"))
+            children.append(self.panel(lambda: self.mass_vs_potential(height=RESULTS_PLOT_HEIGHT),
+                                       *sig, self.controls.plot_reset_version, title="Mass vs time"))
+            return pn.Column(*children, margin=0, sizing_mode="stretch_width", css_classes=["qcm-page-results"])
 
         cyc = self._cycle_inputs
         side = pn.Column(
@@ -393,10 +474,15 @@ class ResultsStep(BaseStep):
         # headline plot sits beside the short Technique/Cycle controls so their
         # heights match (no dead column), and the detail plots + table span the
         # full width below.
-        return pn.Column(
-            self.panel(self.summary_cards, *sig, title="Summary (current analysis range)"),
+        rows = [
+            self.panel(self.summary_cards, *sig, rv, title="Summary (current analysis range)"),
+        ]
+        if self._is_multi():
+            rows.append(self.panel(self.per_channel_comparison_table, *sig, rv,
+                                   title="Per-channel comparison (all runs)"))
+        rows += [
             pn.Row(
-                self.panel(lambda: self.primary_echem_plot(), *sig, *cyc, self.controls.plot_reset_version,
+                self.panel(lambda: self.primary_echem_plot(), *sig, *cyc, rv, self.controls.plot_reset_version,
                            title="Electrochemistry"),
                 side,
                 margin=0, sizing_mode="stretch_width", css_classes=["qcm-results-midrow"],
@@ -404,12 +490,12 @@ class ResultsStep(BaseStep):
             pn.Row(
                 self.panel(lambda: self.mass_vs_potential(height=PLOT_HEIGHT), *sig, self.controls.plot_reset_version,
                            title="Mass vs potential"),
-                self.panel(lambda: self.density_vs_potential(height=PLOT_HEIGHT), *sig, *cyc, self.controls.plot_reset_version,
+                self.panel(lambda: self.density_vs_potential(height=PLOT_HEIGHT), *sig, *cyc, rv, self.controls.plot_reset_version,
                            title="Current density vs potential"),
                 margin=0, sizing_mode="stretch_width", css_classes=["qcm-results-plotrow"],
             ),
             self.panel(lambda: self.cycle_overlay_plot(), *sig, *cyc, self.controls.plot_reset_version,
                        title="Cycle overlay", controls=pn.Row(self.cycle_zero, margin=0)),
-            self.panel(self.per_cycle_table, *sig, *cyc, title="Per-cycle summary"),
-            margin=0, sizing_mode="stretch_width", css_classes=["qcm-page-results"],
-        )
+            self.panel(self.per_cycle_table, *sig, *cyc, rv, title="Per-cycle summary"),
+        ]
+        return pn.Column(*rows, margin=0, sizing_mode="stretch_width", css_classes=["qcm-page-results"])

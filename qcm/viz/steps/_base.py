@@ -293,6 +293,13 @@ class BaseStep:
             ax = axis(state.x_axis)
             q = quantity(state.quantity)
             full = replace(state, t_range_s=(0.0, float(self.data.info.span_s)))
+
+            # Multi-run: overlay every loaded run on the same quantity timeline.
+            # Single-run keeps the richer single-run path below (twin axis, etc.).
+            runset = getattr(self.data, "runset", None)
+            if runset is not None and runset.is_multi:
+                return self._overlay_anchor(state, ax, q, full, window, height, show_legend)
+
             value_df, elapsed = self.data.value_df(full, state.quantity, state.x_axis)
 
             companion_df = None
@@ -360,30 +367,89 @@ class BaseStep:
                         if (q.kind == "mpe" and getattr(state, "mpe_target_show", False))
                         else None),
             )
-            zero_w = getattr(self.controls, "zero_line", None)
-            if zero_w is not None and bool(zero_w.value):
-                try:
-                    plot = plot * hv.HLine(0).opts(color=FAINT, line_dash="dashed", line_width=1)
-                except Exception:
-                    pass
-            if ax.is_time:
-                plot = self.with_phase_labels(plot, value_df, height=height)
-            # Legend options must be set on the OUTERMOST overlay — composing the
-            # plot with the zero line / phase labels (the ``*`` above) creates a new
-            # container that otherwise reverts to a default inside top-right legend,
-            # which overlaps the curves on the dense main graph and reads as missing.
-            try:
-                plot = plot.opts(hv.opts.Overlay(
-                    show_legend=show_legend, legend_position="right",
-                    xlabel=ax.axis_label, ylabel=q.axis_label,
-                ))
-            except Exception:
-                pass
-            if ax.is_time:
-                return self.interactive_plot(self.force_plot_height(plot, height))
-            return self.nearest_hover(self.force_plot_height(plot, height))
+            return self._finish_anchor(plot, ax, q, height, show_legend, label_df=value_df)
         except Exception as exc:  # pragma: no cover
             return pn.pane.Alert(f"Plot failed: {exc}", alert_type="danger")
+
+    def _anchor_window(self, state, window: str) -> tuple[float, float]:
+        """The highlighted span for the hero plot in the active selection mode."""
+        if window == "reference":
+            return state.baseline_s
+        if window == "mark":
+            return tuple(float(v) for v in self.controls.mark_range.value)
+        return state.t_range_s
+
+    def _finish_anchor(self, plot, ax, q, height, show_legend, label_df=None):
+        """Shared hero-plot tail: zero line, phase labels, legend, interactivity.
+
+        Legend options must be set on the OUTERMOST overlay — composing the plot
+        with the zero line / phase labels creates a new container that otherwise
+        reverts to a default inside top-right legend, which overlaps the curves on
+        the dense main graph and reads as missing.
+        """
+        zero_w = getattr(self.controls, "zero_line", None)
+        if zero_w is not None and bool(zero_w.value):
+            try:
+                plot = plot * hv.HLine(0).opts(color=FAINT, line_dash="dashed", line_width=1)
+            except Exception:
+                pass
+        if ax.is_time and label_df is not None:
+            plot = self.with_phase_labels(plot, label_df, height=height)
+        try:
+            plot = plot.opts(hv.opts.Overlay(
+                show_legend=show_legend, legend_position="right",
+                xlabel=ax.axis_label, ylabel=q.axis_label,
+            ))
+        except Exception:
+            pass
+        if ax.is_time:
+            return self.interactive_plot(self.force_plot_height(plot, height))
+        return self.nearest_hover(self.force_plot_height(plot, height))
+
+    def _overlay_anchor(self, state, ax, q, full, window: str, height: int, show_legend: bool):
+        """Hero plot for a multi-run set: every run overlaid on one quantity.
+
+        The shared view selection (quantity, x-axis, time range, baseline) applies
+        to every run; each run is aligned to its own start and referenced to its
+        own baseline by :meth:`RunSet.overlay_value_df`. Window/baseline/cycle and
+        phase context is drawn for the active run only.
+        """
+        runset = self.data.runset
+        frame = runset.overlay_value_df(full, state.quantity, state.x_axis)
+        if frame.is_empty():
+            return self.empty_state(f"No {q.label} data in any loaded run.")
+
+        show_cycles_w = getattr(self.controls, "show_cycles", None)
+        show_cycles = bool(show_cycles_w.value) if show_cycles_w is not None else False
+        cycle_spans = self.data.cycle_spans() if (show_cycles and ax.is_time) else None
+
+        show_phases_w = getattr(self.controls, "show_phases", None)
+        show_phases = bool(show_phases_w.value) if show_phases_w is not None else True
+        spans = self.data.annotation_spans(state) if (show_phases and ax.is_time) else []
+
+        visible_groups = self.controls.frequency_groups() if q.kind == "frequency" else full.groups
+        win = self._anchor_window(state, window)
+
+        title = (f"{q.label} vs {ax.label} · {len(runset.runs)} runs · "
+                 f"{frame.height:,} points")
+        plot = plots.overlay_timeline(
+            frame, q, ax,
+            run_labels=runset.labels(),
+            run_orders=[d.info.orders for d in runset.runs],
+            title=title,
+            visible_groups=visible_groups,
+            baseline=state.baseline_s if (q.referenced and window != "reference") else None,
+            window=win,
+            annotation_spans=spans,
+            cycle_spans=cycle_spans,
+            select_x=ax.is_time,
+            height=height,
+            show_legend=show_legend,
+            target=(state.params.target_mpe
+                    if (q.kind == "mpe" and getattr(state, "mpe_target_show", False))
+                    else None),
+        )
+        return self._finish_anchor(plot, ax, q, height, show_legend, label_df=frame)
 
     # Backward-compatible alias: the per-step anchors call this.
     def overview_anchor(self, window: str = "current"):

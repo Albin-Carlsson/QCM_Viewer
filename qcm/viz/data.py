@@ -27,6 +27,9 @@ class QCMViewData:
     def __init__(self, run: QCMRun, info: RunInfo, *, cache_size: int = _CACHE_SIZE):
         self.run = run
         self.info = info
+        # Set when this run is part of a multi-run set (see runset.RunSet); the
+        # hero plot reads it to decide whether to overlay. None == single-run.
+        self.runset = None
         # Bounded LRU over query results keyed by their full argument tuple. The
         # hero plot issues two value_df calls and Analyze renders a plot plus a
         # stats table from the same state; without this they would re-scan the

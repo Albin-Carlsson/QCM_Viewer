@@ -168,3 +168,59 @@ OVERTONE_PALETTE = [
 def color_for_slot(slot: int) -> str:
     """Stable color for the n-th selected overtone."""
     return OVERTONE_PALETTE[slot % len(OVERTONE_PALETTE)]
+
+
+# Per-run hue families for multi-run overlays. Each run is one base hue (drawn
+# from the colorblind-safe Wong palette so runs stay distinguishable); overtones
+# within a run are shades of that hue, lightened by overtone slot. Run = family,
+# overtone = shade within the family.
+RUN_FAMILY_HUES = [
+    "#0072b2",  # blue
+    "#d55e00",  # vermillion
+    "#009e73",  # bluish green
+    "#cc79a7",  # reddish purple
+    "#e69f00",  # orange
+    "#56b4e9",  # sky blue
+]
+
+
+def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
+    h = hex_color.lstrip("#")
+    return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+
+def _rgb_to_hex(rgb: tuple[float, float, float]) -> str:
+    return "#{:02x}{:02x}{:02x}".format(*(max(0, min(255, round(c))) for c in rgb))
+
+
+def color_for_run(run_slot: int) -> str:
+    """Base hue for the n-th run in a run set."""
+    return RUN_FAMILY_HUES[run_slot % len(RUN_FAMILY_HUES)]
+
+
+# Lightness offsets applied to a family's base hue, ordered by overtone slot.
+# The base hue sits in the middle of the ramp; earlier overtones go darker,
+# later ones lighter. Hue and saturation are preserved so every shade reads as
+# the same family rather than fading toward grey (which a blend-toward-white
+# ramp does). Values past the end of the list clamp to the extremes.
+_SHADE_LIGHTNESS_STEPS = (0.0, +0.16, -0.16, +0.30, -0.28)
+
+
+def color_for_run_overtone(run_slot: int, overtone_slot: int) -> str:
+    """Shade within a run's hue family for the n-th visible overtone.
+
+    The first overtone uses the family's base hue; later overtones step the
+    lightness up/down around it while keeping hue and saturation, so multiple
+    traces from one run stay distinguishable yet recognisably the same family.
+    """
+    base = color_for_run(run_slot)
+    if overtone_slot <= 0:
+        return base
+    import colorsys
+
+    r, g, b = (c / 255.0 for c in _hex_to_rgb(base))
+    h, l, s = colorsys.rgb_to_hls(r, g, b)
+    steps = _SHADE_LIGHTNESS_STEPS
+    delta = steps[overtone_slot] if overtone_slot < len(steps) else steps[-1]
+    l = max(0.18, min(0.88, l + delta))
+    return _rgb_to_hex(tuple(c * 255.0 for c in colorsys.hls_to_rgb(h, l, s)))

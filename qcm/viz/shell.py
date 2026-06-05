@@ -17,9 +17,13 @@ everything that merely *reacts* to a widget references it through ``pn.bind``
 """
 from __future__ import annotations
 
+import tempfile
 from html import escape
+from pathlib import Path
 
 import panel as pn
+
+from qcm.profiles import detect_profile, import_run, profile_kind
 
 from . import echem, nav
 from .actions import ViewerActions
@@ -36,7 +40,11 @@ from .controls import ViewerControls
 from .data import QCMViewData
 from .state import RunInfo
 from .theme import ELECTRODE_AREA_CM2, HERO_HEIGHT
-from .tokens import PHASE_COLORS as _PHASE_COLORS, PHASE_DEFAULT as _PHASE_DEFAULT
+from .tokens import (
+    PHASE_COLORS as _PHASE_COLORS,
+    PHASE_DEFAULT as _PHASE_DEFAULT,
+    color_for_run,
+)
 from .steps.phases import PhasesStep
 from .steps.qc_drawer import QCDrawer
 from .steps.quantify import QuantifyStep
@@ -50,12 +58,13 @@ class ViewerShell:
     """Assemble the three-page workbench without owning analysis behavior."""
 
     def __init__(self, run, info: RunInfo, controls: ViewerControls,
-                 data: QCMViewData, actions: ViewerActions):
+                 data: QCMViewData, actions: ViewerActions, runset=None):
         self.run = run
         self.info = info
         self.controls = controls
         self.data = data
         self.actions = actions
+        self.runset = runset
 
         self.mode = pn.widgets.IntInput(value=0, visible=False)
         # Back-compat aliases for tests/scripts that poke shell.step / shell.focus.
@@ -82,16 +91,29 @@ class ViewerShell:
         # are truly separate and avoids any leftover layout from a hidden page.
         self._page_host = pn.Column(margin=0, sizing_mode="stretch_width", css_classes=["qcm-pagehost"])
 
+        # Built before the sidebar so the "Add run" button can open it.
+        self._run_modal = self._build_add_run_modal() if self.runset is not None else None
         self._cached_topbar = self._build_topbar()
         self._cached_sidebar = self._build_sidebar()
         self._cached_drawer = self._build_drawer()
 
         self.mode.param.watch(self._on_mode_change, "value")
+        # When the run set changes (run added / relabelled / active switched) the
+        # single-run pages must rebuild against the new active run; the mounted
+        # page host is updated in place so the change shows without a reload.
+        self.controls.runset_version.param.watch(self._on_runset_change, "value")
         self._sync_pages(self.mode.value)
 
     # -- reactions --------------------------------------------------------
     def _on_mode_change(self, event) -> None:
         self._sync_pages(int(event.new))
+
+    def _on_runset_change(self, _event=None) -> None:
+        self._page_data = self._build_data_page()
+        self._page_results = self._build_results_page()
+        self._page_report = self._build_report_page()
+        self._pages = {"data": self._page_data, "results": self._page_results, "report": self._page_report}
+        self._sync_pages(self.mode.value)
 
     def _sync_pages(self, index: int) -> None:
         active = nav.mode_id(index)
@@ -110,6 +132,10 @@ class ViewerShell:
 
     # =====================================================  sidebar
     def _run_info_card(self):
+        # Reflect the active run: rebuild when the run set / active run changes.
+        return pn.bind(self._run_info_card_body, self.controls.runset_version)
+
+    def _run_info_card_body(self, *_):
         meta = {}
         try:
             meta = dict(self.run.manifest.metadata)
@@ -137,6 +163,192 @@ class ViewerShell:
             sizing_mode="stretch_width", css_classes=["qcm-card", "qcm-runinfo"],
         )
 
+    # =====================================================  run manager
+    def _bump_runset(self) -> None:
+        self.controls.runset_version.value += 1
+
+    def _runs_card(self):
+        """Run-manager card: list runs (swatch · label · active), add a run."""
+        if self.runset is None:
+            return pn.Spacer(height=0)
+        return pn.Card(
+            pn.bind(self._runs_card_body, self.controls.runset_version),
+            title="Runs", collapsible=False, margin=0,
+            sizing_mode="stretch_width", css_classes=["qcm-card", "qcm-runs"],
+        )
+
+    def _runs_card_body(self, *_):
+        rows = [self._run_row(slot) for slot in range(len(self.runset.runs))]
+        return pn.Column(*rows, self._add_run_control(),
+                         margin=0, sizing_mode="stretch_width", css_classes=["qcm-runs-body"])
+
+    def _run_row(self, slot: int):
+        is_active = slot == self.runset.active_index
+        color = color_for_run(slot)
+        label = pn.widgets.TextInput(
+            value=self.runset.labels()[slot], margin=0, sizing_mode="stretch_width",
+            css_classes=["qcm-run-label"],
+        )
+        label.param.watch(lambda e, s=slot: self._on_label_edit(s, e.new), "value")
+        # The radio doubles as the legend key: it is tinted with the run's family
+        # colour. Filled (circle-dot) = active run, which drives the single-run
+        # views; an open circle picks a run. Inactive runs still show in the
+        # overlay — this is not a hide toggle.
+        icon = "circle-dot" if is_active else "circle"
+        # Strip the button chrome so only the coloured glyph shows (no grey box to
+        # butt against the card edge) and center it. Panel's button box can live on
+        # the host or any button variant, so reset them all.
+        reset = ("background:transparent !important;border:0 !important;"
+                 "box-shadow:none !important;padding:0 !important;")
+        sheet = (f":host{{{reset}}}"
+                 f"button,.bk-btn,.bk-btn-default,.bk-btn-group{{{reset}"
+                 f"color:{color} !important;opacity:1 !important;"
+                 "display:flex;align-items:center;justify-content:center;}"
+                 f"svg{{color:{color};stroke:{color};}}")
+        pick = pn.widgets.Button(
+            icon=icon, button_type="default", width=34, margin=0, disabled=is_active,
+            stylesheets=[sheet], css_classes=["qcm-run-active" if is_active else "qcm-run-pick"],
+            description=("Active run — drives the raw & report views" if is_active
+                         else "Make this the active run (raw & report views)"),
+        )
+        if not is_active:
+            pick.on_click(lambda _e, s=slot: self._on_set_active(s))
+        # Fixed toggle leads so it is always visible; the label takes the rest.
+        return pn.Row(pick, label, margin=0, sizing_mode="stretch_width",
+                      css_classes=["qcm-run-row"] + (["is-active"] if is_active else []))
+
+    def _add_run_control(self):
+        # The directory browser is ~600px wide and would blow out the fixed
+        # sidebar, so the sidebar only carries a compact button; the browser
+        # itself lives in a modal (built once, mounted at the app root).
+        open_btn = pn.widgets.Button(name="Add run", icon="plus", button_type="default",
+                                     sizing_mode="stretch_width", css_classes=["qcm-add-run-btn"])
+        open_btn.on_click(lambda _e: self._open_add_run_modal())
+        return open_btn
+
+    # Display names + the QCM-source override choices (PS profiles attach via the
+    # optional pairing, not as a run source).
+    _PROFILE_LABELS = {
+        "standardized_csv": "Standardized QCM CSV",
+        "qsoft_txt": "Qsoft .txt",
+        "pstrace_cv": "PSTrace CV",
+        "pstrace_cp": "PSTrace CP",
+        "parquet": "Ingested run / parquet",
+    }
+    _OVERRIDE_OPTIONS = {
+        "Auto-detect": "auto",
+        "Standardized QCM CSV": "standardized_csv",
+        "Qsoft .txt": "qsoft_txt",
+    }
+
+    def _build_add_run_modal(self):
+        root = str(self.runset.active.run.path.parent)
+        self._run_browser = pn.widgets.FileSelector(
+            directory=root, margin=0, sizing_mode="stretch_width", css_classes=["qcm-run-browser"],
+        )
+        self._ps_browser = pn.widgets.FileSelector(
+            directory=root, margin=0, sizing_mode="stretch_width", css_classes=["qcm-run-browser"],
+        )
+        self._profile_override = pn.widgets.Select(
+            name="Profile", options=self._OVERRIDE_OPTIONS, value="auto", sizing_mode="stretch_width",
+        )
+        add = pn.widgets.Button(name="Import & add", icon="plus", button_type="primary")
+        add.on_click(lambda _e: self._confirm_add_run())
+        detected = pn.bind(self._detected_profile_html, self._run_browser.param.value,
+                           self._profile_override)
+        return pn.Modal(
+            pn.pane.HTML("<div class='qcm-drawer-title'>Add a run to the overlay</div>", margin=0),
+            pn.pane.HTML("<div class='eyebrow'>Run directory or instrument file</div>", margin=0),
+            self._run_browser,
+            pn.Row(self._profile_override, pn.Column(detected, margin=0, sizing_mode="stretch_width"),
+                   margin=0, sizing_mode="stretch_width", css_classes=["qcm-import-detect"]),
+            pn.Card(
+                pn.pane.HTML("<div class='eyebrow'>Pair a potentiostat (PSTrace) export — CV or CP</div>", margin=0),
+                self._ps_browser,
+                title="Electrochemistry (optional)", collapsible=True, collapsed=True,
+                margin=0, sizing_mode="stretch_width", css_classes=["qcm-card"],
+            ),
+            pn.Row(pn.layout.HSpacer(), add, margin=0, sizing_mode="stretch_width"),
+            width=760, show_close_button=True, background_close=True,
+            margin=0, css_classes=["qcm-run-modal"],
+        )
+
+    @staticmethod
+    def _first_path(value):
+        if isinstance(value, list):
+            return value[0] if value else None
+        return value or None
+
+    def _detected_profile_html(self, value, override):
+        p = self._first_path(value)
+        if not p:
+            return pn.pane.HTML("<div class='qcm-import-msg'>Choose a run directory or instrument file.</div>")
+        path = Path(p)
+        if path.is_dir() and (path / "manifest.json").exists():
+            return pn.pane.HTML("<div class='qcm-import-ok'>✓ Ingested run — loads directly</div>")
+        if override != "auto":
+            return pn.pane.HTML(
+                f"<div class='qcm-import-ok'>Forcing profile: "
+                f"{escape(self._PROFILE_LABELS.get(override, override))}</div>")
+        name = detect_profile(path)
+        if name is None:
+            return pn.pane.HTML(
+                f"<div class='qcm-import-warn'>⚠ No profile matched ‘{escape(path.name)}’. "
+                f"Pick a profile to override, or check the file.</div>")
+        if profile_kind(name) == "ps":
+            return pn.pane.HTML(
+                f"<div class='qcm-import-warn'>⚠ ‘{escape(path.name)}’ is a potentiostat export — "
+                f"add it under <em>Electrochemistry</em> pairing, not as the run source.</div>")
+        return pn.pane.HTML(
+            f"<div class='qcm-import-ok'>✓ Detected: {escape(self._PROFILE_LABELS.get(name, name))}</div>")
+
+    def _open_add_run_modal(self) -> None:
+        self._run_modal.show()
+
+    def _confirm_add_run(self) -> None:
+        ps = self._first_path(self._ps_browser.value)
+        self._on_add_run(self._run_browser.value, ps=ps, override=self._profile_override.value)
+        try:
+            self._run_modal.hide()
+        except Exception:
+            pass
+
+    def _on_label_edit(self, slot: int, text: str) -> None:
+        if text and text.strip() and text.strip() != self.runset.labels()[slot]:
+            self.runset.set_label(slot, text)
+            self._bump_runset()
+
+    def _on_set_active(self, slot: int) -> None:
+        self.runset.set_active(slot)
+        self.actions.notify(f"Active run: {self.runset.labels()[slot]}", "info")
+        self._bump_runset()
+
+    def _import_or_load(self, path: Path, ps, override: str) -> None:
+        """Add an already-ingested run dir directly, or import a raw instrument
+        file (auto-detected or forced via ``override``) then add it."""
+        if path.is_dir() and (path / "manifest.json").exists():
+            self.runset.add_path(path)
+            return
+        dest = Path(tempfile.mkdtemp(prefix="qcm_import_")) / f"{path.stem}_run"
+        import_run(path, dest, profile=(None if override == "auto" else override), ps_source=ps)
+        self.runset.add_path(dest)
+
+    def _on_add_run(self, selected, *, ps=None, override: str = "auto") -> None:
+        paths = selected if isinstance(selected, list) else ([selected] if selected else [])
+        if not paths:
+            self.actions.notify("Pick a run directory or instrument file first.", "warning")
+            return
+        added = 0
+        for p in paths:
+            try:
+                self._import_or_load(Path(p), ps, override)
+                added += 1
+            except Exception as exc:  # noqa: BLE001
+                self.actions.notify(f"Could not add ‘{Path(p).name}’: {exc}", "error")
+        if added:
+            self.actions.notify(f"Added {added} run(s) to the overlay.", "success")
+            self._bump_runset()
+
     def _nav(self):
         def render(active: int):
             active = nav.clamp_mode(int(active))
@@ -160,6 +372,7 @@ class ViewerShell:
         return pn.Column(
             brand("QCM-D Viewer"),
             self._nav(),
+            self._runs_card(),
             self._run_info_card(),
             pn.layout.Spacer(css_classes=["qcm-sidebar-spacer"]),
             pn.Column(help_btn, margin=0, sizing_mode="stretch_width", css_classes=["qcm-help"]),
@@ -213,6 +426,7 @@ class ViewerShell:
             self.controls.mark_end,
             self.controls.annotation_version,
             self.controls.plot_reset_version,
+            self.controls.runset_version,
         )
         # The active-range slider rides flush under the plot inside the same card,
         # matching the plot width so it reads as the plot's own range scrubber.
@@ -337,7 +551,10 @@ class ViewerShell:
             self._cached_sidebar, content,
             margin=0, sizing_mode="stretch_width", css_classes=["qcm-shell"],
         )
+        children = [shell, self._cached_drawer]
+        if self._run_modal is not None:
+            children.append(self._run_modal)
         return pn.Column(
-            shell, self._cached_drawer,
+            *children,
             margin=0, sizing_mode="stretch_width", css_classes=["qcm-app"],
         )

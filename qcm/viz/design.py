@@ -57,12 +57,20 @@ html, body {
 /* --- sidebar --------------------------------------------------------------- */
 .qcm-sidebar {
   flex: 0 0 var(--qcm-sidebar-w); width: var(--qcm-sidebar-w);
+  /* A flex item's default min-width is its content's min-content size. The
+     directory browser is intrinsically ~600px wide, so without this floor it
+     would blow the sidebar out to ~40% of the screen. Pin the width and clip. */
+  min-width: 0; max-width: var(--qcm-sidebar-w);
   display: flex; flex-direction: column; gap: var(--qcm-space-4);
   padding: var(--qcm-space-4) var(--qcm-space-3);
   background: var(--qcm-surface);
   border-right: 1px solid var(--qcm-border);
-  position: sticky; top: 0; align-self: flex-start; height: 100vh; overflow-y: auto;
+  position: sticky; top: 0; align-self: flex-start; height: 100vh;
+  overflow-y: auto; overflow-x: hidden;
 }
+/* Keep every sidebar card inside the pinned width regardless of intrinsic
+   child sizes (the file browser in particular). */
+.qcm-sidebar > * { min-width: 0; max-width: 100%; }
 .qcm-brand { display: flex; align-items: center; gap: var(--qcm-space-2); padding: 0 var(--qcm-space-1) var(--qcm-space-2); }
 .qcm-brand-mark {
   display: inline-flex; width: 30px; height: 30px; align-items: center; justify-content: center;
@@ -94,6 +102,28 @@ html, body {
    (Targets the card's own class: Panel renders each component in its own shadow
    root, so a `.qcm-sidebar .qcm-card` descendant rule can't reach across it.) */
 .qcm-runinfo { border-color: var(--qcm-border-strong); }
+
+/* --- run manager ----------------------------------------------------------- */
+.qcm-runs { border-color: var(--qcm-border-strong); }
+/* Inset the rows so the radio and label fields breathe inside the card. */
+.qcm-runs-body { display: flex; flex-direction: column; gap: var(--qcm-space-2); padding: 2px 2px 4px; }
+/* Panel's Row writes align-items inline (default `start`); override it so the
+   radio lines up with the label text vertically. */
+.qcm-run-row { align-items: center !important; gap: var(--qcm-space-3); padding: 0; min-width: 0; }
+.qcm-run-row.is-active { font-weight: 600; }
+/* Let the label field shrink so the fixed swatch + active toggle always fit
+   inside the sidebar instead of overflowing (and clipping) the toggle. */
+.qcm-run-label { min-width: 0; flex: 1 1 auto; }
+.qcm-run-active, .qcm-run-pick { flex: 0 0 auto; }
+/* The run rows live in the fixed-width sidebar; the bulky directory browser is
+   in a modal (.qcm-run-modal), so nothing here can force the sidebar wider. */
+.qcm-runs, .qcm-run-row { max-width: 100%; }
+.qcm-add-run-btn { margin-top: var(--qcm-space-2); }
+.qcm-run-modal .qcm-run-browser { min-height: 280px; }
+.qcm-import-detect { align-items: center; gap: var(--qcm-space-3); margin-top: var(--qcm-space-2); }
+.qcm-import-ok { color: var(--qcm-accent); font-size: 12px; font-weight: 600; }
+.qcm-import-warn { color: #b45309; font-size: 12px; font-weight: 600; }
+.qcm-import-msg { color: var(--qcm-ink-soft); font-size: 12px; }
 
 /* --- content + top bar ----------------------------------------------------- */
 .qcm-content {

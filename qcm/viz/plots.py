@@ -26,6 +26,7 @@ from .theme import (
     WATERFALL_PANEL_HEIGHT,
     Axis,
     Quantity,
+    color_for_run_overtone,
     color_for_slot,
 )
 from .tokens import CYCLE_BAND_COLOR, HEADER_BG
@@ -573,6 +574,120 @@ def analysis_timeline(
     )
 
 
+def _run_groups(sub: pl.DataFrame, visible_groups: list[int] | None) -> list[int]:
+    """Sorted, visible group ids present in one run's slice of an overlay frame."""
+    if sub.is_empty() or "group" not in sub.columns:
+        return []
+    groups = sorted(int(g) for g in sub["group"].unique().to_list() if g is not None)
+    if visible_groups is not None:
+        allow = set(int(g) for g in visible_groups)
+        groups = [g for g in groups if g in allow]
+    return groups
+
+
+def overlay_timeline(
+    frame: pl.DataFrame,
+    q: Quantity,
+    ax: Axis,
+    *,
+    run_labels: list[str],
+    run_orders: list[dict[int, int]],
+    title: str,
+    visible_groups: list[int] | None = None,
+    baseline: tuple[float, float] | None = None,
+    window: tuple[float, float] | None = None,
+    annotation_spans: list | None = None,
+    cycle_spans: list | None = None,
+    select_x: bool = False,
+    height: int = PLOT_HEIGHT,
+    show_legend: bool = True,
+    target: float | None = None,
+):
+    """Multi-run overlay of one quantity vs the selected x-axis.
+
+    ``frame`` is the long-form overlay frame from
+    :meth:`RunSet.overlay_value_df`: per-run ``value_df`` columns plus ``run``
+    (label) and ``run_slot``. Each run becomes a hue family; overtones within a
+    run are shades of that family. Cell-level electrochemistry quantities are
+    shared across overtones, so each run draws a single curve.
+
+    Time-based context (analysis window, reference span, saved-region markers,
+    cycle bands) belongs to the *active* run and is supplied by the caller; it is
+    drawn once, behind the per-run curves, only on the time axis.
+    """
+    on_time = ax.is_time
+    elements: list = []
+    if on_time and cycle_spans:
+        elements.extend(cycle_band_elements(cycle_spans))
+    if on_time:
+        elements.extend(window_elements(window))
+    if on_time and baseline is not None:
+        elements.append(baseline_span(*baseline))
+    if target is not None:
+        elements.append(
+            hv.HLine(float(target)).opts(color=EVENT_COLOR, line_dash="dashed", line_width=1.6)
+        )
+
+    curves: list = []
+    slots = sorted(int(s) for s in frame["run_slot"].unique().to_list()) if not frame.is_empty() else []
+    for slot in slots:
+        sub = frame.filter(pl.col("run_slot") == slot)
+        label = run_labels[slot] if slot < len(run_labels) else f"Run {slot}"
+        orders = run_orders[slot] if slot < len(run_orders) else {}
+        if q.is_echem:
+            # Cell-level signal: identical across overtones — one curve per run.
+            groups = _run_groups(sub, None)
+            g0 = groups[0] if groups else 0
+            x, y = _xy_axis(sub, g0, ax.monotonic)
+            if len(x):
+                curves.append(
+                    hv.Curve((x, y), ax.axis_label, q.axis_label, label=label).opts(
+                        color=color_for_run_overtone(slot, 0), line_width=1.8
+                    )
+                )
+            continue
+        groups = _run_groups(sub, visible_groups)
+        multi = len(groups) > 1
+        for o_slot, g in enumerate(groups):
+            x, y = _xy_axis(sub, g, ax.monotonic)
+            if not len(x):
+                continue
+            name = f"{label} · n{orders.get(g, g)}" if multi else label
+            curves.append(
+                hv.Curve((x, y), ax.axis_label, q.axis_label, label=name).opts(
+                    color=color_for_run_overtone(slot, o_slot), line_width=1.8
+                )
+            )
+
+    elements.extend(curves)
+    if on_time:
+        elements.extend(annotation_elements(annotation_spans or []))
+    if not curves:
+        return empty(f"No {q.label} data")
+
+    tools, active = _time_tools(select_x)
+    hooks: list = []
+    if ax.monotonic:
+        hooks.append(_vline_hover_hook)
+    hooks.append(_legend_mute_hook)
+    if on_time:
+        if cycle_spans:
+            hooks.append(_cycle_label_hook(cycle_spans))
+        hooks.append(_saved_region_label_hook(annotation_spans or []))
+        if select_x:
+            hooks.append(_xbox_select_hook)
+    hooks.append(_autohide_toolbar_hook)
+    return hv.Overlay(elements).opts(
+        hv.opts.Overlay(
+            title=title, height=height, responsive=True, legend_position="right",
+            xlabel=ax.axis_label, ylabel=q.axis_label,
+            show_legend=show_legend,
+            active_tools=active, tools=tools, hooks=hooks, show_grid=True,
+        ),
+        hv.opts.Curve(tools=["hover"]),
+    )
+
+
 def _twin_axis_hook(d_lo: float, d_hi: float, axis_label: str):
     """Route dashed (ΔD) glyphs to a second right-hand y-axis."""
     def hook(plot, _element):
@@ -762,6 +877,88 @@ def echem_curve(
             if len(x):
                 curves.append(
                     hv.Curve((x, y), xlabel, ylabel).opts(color=ACCENT, line_width=1.7)
+                )
+
+    if not curves:
+        return empty(f"No {ylabel} data")
+    hooks = [_legend_mute_hook]
+    if monotonic:
+        hooks.insert(0, _vline_hover_hook)
+    return hv.Overlay(curves).opts(
+        hv.opts.Overlay(
+            title=title, height=height, responsive=True, legend_position="right",
+            show_legend=show_legend,
+            active_tools=["wheel_zoom"], tools=["hover", "box_zoom", "reset"],
+            hooks=hooks, show_grid=True,
+        ),
+        hv.opts.Curve(tools=["hover"]),
+    )
+
+
+def echem_overlay(
+    frame: pl.DataFrame,
+    xcol: str,
+    ycol: str,
+    xlabel: str,
+    ylabel: str,
+    title: str,
+    *,
+    by_cycle: bool = True,
+    monotonic: bool = False,
+    height: int = PLOT_HEIGHT,
+    show_legend: bool = True,
+):
+    """Multi-run echem overlay: one CV/CP trace per run (and cycle).
+
+    ``frame`` is the run-tagged waveform from
+    :func:`echem.overlay_selected_waveforms` (``run``/``run_slot`` columns). Each
+    run is a hue family; when ``by_cycle`` is set, cycles within a run are shades
+    of that family, so the same cycle compares across runs by colour family.
+    """
+    if frame.is_empty() or xcol not in frame.columns or ycol not in frame.columns:
+        return empty(f"No {ylabel} data")
+    if "run_slot" not in frame.columns:
+        return empty(f"No {ylabel} data")
+    sort_col = "time_s" if "time_s" in frame.columns else xcol
+
+    def _decimate(x, y):
+        if monotonic:
+            return _decimate_xy(x, y)
+        if len(x) > MAX_PLOT_POINTS:
+            step = len(x) // MAX_PLOT_POINTS + 1
+            return x[::step], y[::step]
+        return x, y
+
+    curves: list = []
+    for slot in sorted(int(s) for s in frame["run_slot"].unique().to_list()):
+        sub_run = frame.filter(pl.col("run_slot") == slot)
+        label = str(sub_run["run"][0])
+        if by_cycle and "cycle" in sub_run.columns:
+            cycles = sorted(int(c) for c in sub_run["cycle"].unique().drop_nulls().to_list())
+            multi = len(cycles) > 1
+            for cslot, cyc in enumerate(cycles):
+                sub = sub_run.filter(pl.col("cycle") == cyc).sort(sort_col).drop_nulls([xcol, ycol])
+                if sub.is_empty():
+                    continue
+                x, y = _decimate(sub[xcol].to_numpy(), sub[ycol].to_numpy())
+                if not len(x):
+                    continue
+                name = f"{label} · c{cyc}" if multi else label
+                curves.append(
+                    hv.Curve((x, y), xlabel, ylabel, label=name).opts(
+                        color=color_for_run_overtone(slot, cslot), line_width=1.5
+                    )
+                )
+        else:
+            sub = sub_run.sort(sort_col).drop_nulls([xcol, ycol])
+            if sub.is_empty():
+                continue
+            x, y = _decimate(sub[xcol].to_numpy(), sub[ycol].to_numpy())
+            if len(x):
+                curves.append(
+                    hv.Curve((x, y), xlabel, ylabel, label=label).opts(
+                        color=color_for_run_overtone(slot, 0), line_width=1.6
+                    )
                 )
 
     if not curves:

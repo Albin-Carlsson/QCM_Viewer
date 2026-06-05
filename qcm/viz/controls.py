@@ -476,6 +476,10 @@ class ViewerControls:
 
         self.annotation_version = pn.widgets.IntInput(value=0, visible=False)
         self.plot_reset_version = pn.widgets.IntInput(value=0, visible=False)
+        # Bumped whenever the run set changes (run added, relabelled, or the
+        # active run switched) so the hero overlay, run-manager card, and the
+        # single-run pages rebuild against the new set.
+        self.runset_version = pn.widgets.IntInput(value=0, visible=False)
         self.status = pn.pane.Alert("Workspace ready.", alert_type="light", sizing_mode="stretch_width")
 
     # ---------------------------------------------------------------------

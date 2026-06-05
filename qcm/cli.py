@@ -192,10 +192,12 @@ def export_data(run_path: Path, output: Path, columns: list[str] = typer.Option(
 
 
 @app.command()
-def serve(run_path: Path, port: int = 5006, show: bool = True):
-    cmd = [sys.executable, "-m", "panel", "serve", str(Path(__file__).parent / "panel_app.py"), "--port", str(port), "--args", str(run_path)]
+def serve(run_path: list[Path] = typer.Argument(...), port: int = 5006, show: bool = True):
+    """Serve the viewer. Pass two or more run directories to overlay them."""
+    cmd = [sys.executable, "-m", "panel", "serve", str(Path(__file__).parent / "panel_app.py"),
+           "--port", str(port), "--args", *[str(p) for p in run_path]]
     if show:
-        cmd.insert(-2, "--show")
+        cmd.insert(cmd.index("--args"), "--show")
     raise typer.Exit(subprocess.call(cmd))
 
 

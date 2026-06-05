@@ -17,16 +17,12 @@ from pathlib import Path
 import holoviews as hv
 import panel as pn
 
-from qcm.run import open_run
-
-from . import echem
 from .actions import ViewerActions
 from .controls import ViewerControls
-from .data import QCMViewData
 from .design import APP_CSS
 from .plot_theme import apply as apply_plot_theme
+from .runset import ActiveAttrProxy, ActiveRunView, RunSet
 from .shell import ViewerShell
-from .state import RunInfo
 
 _US = 1_000_000
 
@@ -52,53 +48,35 @@ def _ensure_app_css() -> None:
 
 
 class QCMViewer:
-    """Thin composition root for the viewer."""
+    """Thin composition root for the viewer.
 
-    def __init__(self, run_path: str | Path):
-        self.run = open_run(run_path)
-        self.info = self._read_run_info()
-        self.controls = ViewerControls(self.info, self.run.load_view_state())
-        self.data = QCMViewData(self.run, self.info)
+    Accepts one or more run directories. The active run drives every single-run
+    view; the full :class:`RunSet` drives the overlay views. A single run behaves
+    exactly as before.
+    """
+
+    def __init__(self, run_path: str | Path | list[str | Path]):
+        paths = [run_path] if isinstance(run_path, (str, Path)) else list(run_path)
+        self.runset = RunSet.from_paths(paths)
+        # Single-run views hold proxies that follow the active-run selector; the
+        # shared controls are sized once from the launch run (the selection is
+        # shared across runs, so they are not rebuilt when the active run flips).
+        launch_info = self.runset.active.info
+        self.data = ActiveRunView(self.runset)
+        self.run = ActiveAttrProxy(lambda: self.runset.active.run)
+        self.info = ActiveAttrProxy(lambda: self.runset.active.info)
+        self.controls = ViewerControls(launch_info, self.runset.active.run.load_view_state())
         self.actions = ViewerActions(self.run, self.info, self.controls, self.data)
-        self.shell = ViewerShell(self.run, self.info, self.controls, self.data, self.actions)
-
-    def _read_run_info(self) -> RunInfo:
-        groups = self.run.groups or [0]
-        orders = self.run.overtone_orders()
-        t0_us = self.run.time_start
-        t1_us = self.run.time_end
-        span_s = max((t1_us - t0_us) / _US, 1e-6)
-        try:
-            idx = self.run.sweep_index()
-            fmin = float(idx["frequency_min"].min())
-            fmax = float(idx["frequency_max"].max())
-            seq_min = int(idx["sequence"].min())
-            seq_max = int(idx["sequence"].max())
-            n_sweeps = int(idx["sequence"].n_unique())
-        except Exception:
-            fmin, fmax = 0.0, 1.0
-            seq_min = seq_max = n_sweeps = 0
-        return RunInfo(
-            run_id=self.run.id,
-            groups=groups,
-            orders=orders,
-            t0_us=t0_us,
-            t1_us=t1_us,
-            span_s=span_s,
-            fmin=fmin,
-            fmax=fmax,
-            seq_min=seq_min,
-            seq_max=seq_max,
-            n_sweeps=n_sweeps,
-            rows=self.run.manifest.metadata.get("rows", "?"),
-            has_echem=echem.has_echem(self.run.columns),
-        )
+        self.shell = ViewerShell(self.run, self.info, self.controls, self.data,
+                                 self.actions, self.runset)
 
     def view(self):
         _ensure_app_css()
         return self.shell.view()
 
 
-def app(run_path: str | None = None):
-    run_path = run_path or (sys.argv[-1] if len(sys.argv) > 1 else ".")
+def app(run_path: str | list[str] | None = None):
+    if run_path is None:
+        args = sys.argv[1:]
+        run_path = args if args else ["."]
     return QCMViewer(run_path).view()

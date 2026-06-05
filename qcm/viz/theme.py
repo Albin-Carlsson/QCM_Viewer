@@ -24,6 +24,8 @@ from .tokens import (  # noqa: F401  (re-export)
     SECTION_GAP,
     SWEEP_PANEL_HEIGHT,
     WATERFALL_PANEL_HEIGHT,
+    color_for_run,
+    color_for_run_overtone,
     color_for_slot,
 )
 
