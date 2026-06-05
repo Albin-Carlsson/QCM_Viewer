@@ -229,7 +229,7 @@ class ReportStep(BaseStep):
         return pn.Column(
             self.report_card(),
             self.raw_exports_card(),
-            margin=0, sizing_mode="stretch_width", css_classes=["qcm-page-export"],
+            margin=0, sizing_mode="stretch_width", css_classes=["qcm-page-report"],
         )
 
     # --- legacy hook (kept so the old shell paths still resolve) -----------

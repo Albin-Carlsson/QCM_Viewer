@@ -341,14 +341,14 @@ html, body {
 /* The report page is a focused export console: nothing it could show is unique
    (stats/plots/run-info all live on Data/Results + the sidebar), so it carries
    only Configuration + Export, centered so short content reads as a panel. */
-.qcm-page-export {
+.qcm-page-report {
   max-width: 760px; margin: 0 auto; width: 100%;
   display: flex; flex-direction: column; gap: var(--qcm-space-4);
 }
-.qcm-page-export > * { min-width: 0; }
+.qcm-page-report > * { min-width: 0; }
 /* eyebrows separate the grouped controls within each card */
-.qcm-page-export .eyebrow { margin-top: var(--qcm-space-3); }
-.qcm-page-export .bk-card-body > .eyebrow:first-child { margin-top: 0; }
+.qcm-page-report .eyebrow { margin-top: var(--qcm-space-3); }
+.qcm-page-report .bk-card-body > .eyebrow:first-child { margin-top: 0; }
 /* small helper line under a control group (quiet, not a loud info box) */
 .qcm-export-note { color: var(--qcm-muted); font-size: var(--qcm-fs-caption); margin: 2px 0 var(--qcm-space-1); }
 /* (config checkboxes are styled via stylesheets= injected into the widget shadow
