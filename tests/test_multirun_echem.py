@@ -94,3 +94,19 @@ def test_echem_overlay_by_cycle_splits_per_run_and_cycle():
     )
     curves = [e for e in plot.values() if isinstance(e, hv.Curve)]
     assert len(curves) == 4  # 2 runs x 2 cycles
+
+
+def test_cycle_overlay_runs_curve_per_run_and_cycle():
+    import holoviews as hv
+    from qcm.viz.theme import quantity
+
+    rows = []
+    for slot, run in [(0, "A"), (1, "B")]:
+        for c in (1, 2):
+            for t in range(3):
+                rows.append({"run": run, "run_slot": slot, "cycle": c,
+                             "t_rel_s": float(t), "value": float(t + c + slot)})
+    frame = pl.DataFrame(rows)
+    plot = plots.cycle_overlay_runs(frame, quantity("delta_f_norm"), "cycles")
+    curves = [e for e in plot.values() if isinstance(e, hv.Curve)]
+    assert len(curves) == 4  # 2 runs x 2 cycles

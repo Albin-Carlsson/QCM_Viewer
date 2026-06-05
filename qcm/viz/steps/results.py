@@ -111,14 +111,17 @@ class ResultsStep(BaseStep):
             hi=int(self.cycle_range.value[1]),
         )
 
-    def _cycle_source(self) -> pl.DataFrame:
-        """Waveform with cycles populated — derived from current sign for CP."""
-        wf = self.data.echem_waveform()
+    def _cycle_source_for(self, data) -> pl.DataFrame:
+        """Waveform with cycles populated for one run — CP cycles from current sign."""
+        wf = data.echem_waveform()
         if wf.is_empty():
             return wf
         if echem.detect_technique(wf) == "cp":
             return echem.derive_cycles(wf)
         return wf
+
+    def _cycle_source(self) -> pl.DataFrame:
+        return self._cycle_source_for(self.data)
 
     def _selected_waveform(self) -> pl.DataFrame:
         wf = self.data.echem_waveform()
@@ -307,6 +310,24 @@ class ResultsStep(BaseStep):
         except Exception:
             return stats
 
+    def _run_cycle_rel(self, data, state, q, zero: bool) -> pl.DataFrame:
+        """Cycle-relative ``[timestamp, cycle, t_rel_s, value]`` for one run over
+        the shared cycle selection, or an empty frame when it has no cycles."""
+        full = replace(state, t_range_s=(0.0, float(data.info.span_s)))
+        vdf, _ = data.value_df(full, state.quantity, "time")
+        cyc = self._cycle_source_for(data).select(["timestamp", "cycle"]).unique(subset=["timestamp"])
+        if vdf.is_empty() or cyc.is_empty() or "cycle" not in cyc.columns:
+            return pl.DataFrame()
+        joined = vdf.join(cyc, on="timestamp", how="inner")
+        joined = echem.filter_cycles(
+            joined, self.cycle_mode.value,
+            cycle=int(self.cycle_select.value),
+            lo=int(self.cycle_range.value[0]), hi=int(self.cycle_range.value[1]),
+        )
+        if state.groups:
+            joined = joined.filter(pl.col("group") == state.groups[0])
+        return echem.cycle_relative(joined.select(["timestamp", "cycle", "value"]), zero=zero)
+
     def cycle_overlay_plot(self, height: int = PLOT_HEIGHT):
         """Overlay the selected cycles of the chosen quantity on a common origin."""
         try:
@@ -314,24 +335,32 @@ class ResultsStep(BaseStep):
                 return self.empty_state("No electrochemistry channel.")
             state = self.controls.state()
             q = quantity(state.quantity)
-            full = replace(state, t_range_s=(0.0, float(self.data.info.span_s)))
-            vdf, _ = self.data.value_df(full, state.quantity, "time")
-            cyc = self._cycle_source().select(["timestamp", "cycle"]).unique(subset=["timestamp"])
-            if vdf.is_empty() or cyc.is_empty() or "cycle" not in cyc.columns:
-                return self.empty_state("No cycles to overlay.")
-            joined = vdf.join(cyc, on="timestamp", how="inner")
-            joined = echem.filter_cycles(
-                joined, self.cycle_mode.value,
-                cycle=int(self.cycle_select.value),
-                lo=int(self.cycle_range.value[0]), hi=int(self.cycle_range.value[1]),
-            )
-            if state.groups:
-                joined = joined.filter(pl.col("group") == state.groups[0])
             # Zeroing only makes sense for shift-like resonance quantities, never
             # for an absolute signal such as potential.
             zero = bool(self.cycle_zero.value) and q.kind in ("frequency", "dissipation", "mass")
-            rel = echem.cycle_relative(joined.select(["timestamp", "cycle", "value"]), zero=zero)
-            title = f"{q.label} per cycle" + (" · zeroed at start" if zero else "")
+            zsuffix = " · zeroed at start" if zero else ""
+
+            if self._is_multi():
+                frames = []
+                for slot, d in enumerate(self._runset().runs):
+                    rel = self._run_cycle_rel(d, state, q, zero)
+                    if rel.is_empty():
+                        continue
+                    frames.append(rel.with_columns(
+                        pl.lit(self._runset().labels()[slot]).alias("run"),
+                        pl.lit(slot, dtype=pl.Int32).alias("run_slot"),
+                    ))
+                if not frames:
+                    return self.empty_state("No cycles to overlay.")
+                frame = pl.concat(frames, how="diagonal_relaxed")
+                title = f"{q.label} per cycle · all runs{zsuffix}"
+                return self.nearest_hover(self.force_plot_height(
+                    plots.cycle_overlay_runs(frame, q, title, height=height), height))
+
+            rel = self._run_cycle_rel(self.data, state, q, zero)
+            if rel.is_empty():
+                return self.empty_state("No cycles to overlay.")
+            title = f"{q.label} per cycle{zsuffix}"
             return self.nearest_hover(self.force_plot_height(
                 plots.cycle_overlay(rel, q, title, height=height), height))
         except Exception as exc:  # pragma: no cover
@@ -494,7 +523,7 @@ class ResultsStep(BaseStep):
                            title="Current density vs potential"),
                 margin=0, sizing_mode="stretch_width", css_classes=["qcm-results-plotrow"],
             ),
-            self.panel(lambda: self.cycle_overlay_plot(), *sig, *cyc, self.controls.plot_reset_version,
+            self.panel(lambda: self.cycle_overlay_plot(), *sig, *cyc, rv, self.controls.plot_reset_version,
                        title="Cycle overlay", controls=pn.Row(self.cycle_zero, margin=0)),
             self.panel(self.per_cycle_table, *sig, *cyc, rv, title="Per-cycle summary"),
         ]

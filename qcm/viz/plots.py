@@ -380,6 +380,44 @@ def timeline(
     )
 
 
+def cycle_overlay_runs(frame: pl.DataFrame, q: Quantity, title: str, height: int = PLOT_HEIGHT):
+    """Multi-run cycle overlay: each cycle of each run on a common origin.
+
+    ``frame`` carries ``run``/``run_slot``, ``cycle``, ``t_rel_s`` and ``value``.
+    One curve per (run, cycle): run = hue family, cycle = shade within it, so the
+    same cycle compares across runs by colour family.
+    """
+    if frame.is_empty() or "t_rel_s" not in frame.columns or "run_slot" not in frame.columns:
+        return empty("No cycle data in selection")
+    curves: list = []
+    for slot in sorted(int(s) for s in frame["run_slot"].unique().to_list()):
+        sub_run = frame.filter(pl.col("run_slot") == slot)
+        label = str(sub_run["run"][0])
+        cycles = sorted(int(c) for c in sub_run["cycle"].unique().drop_nulls().to_list())
+        multi = len(cycles) > 1
+        for cslot, c in enumerate(cycles):
+            sub = sub_run.filter(pl.col("cycle") == c).sort("t_rel_s").drop_nulls(["t_rel_s", "value"])
+            if sub.is_empty():
+                continue
+            x, y = _decimate_xy(sub["t_rel_s"].to_numpy(), sub["value"].to_numpy())
+            name = f"{label} · c{c}" if multi else label
+            curves.append(
+                hv.Curve((x, y), "Cycle time [s]", q.axis_label, label=name).opts(
+                    color=color_for_run_overtone(slot, cslot), line_width=1.6
+                )
+            )
+    if not curves:
+        return empty("No cycle data in selection")
+    return hv.Overlay(curves).opts(
+        hv.opts.Overlay(
+            title=title, height=height, responsive=True, legend_position="right",
+            xlabel="Cycle time [s]", ylabel=q.axis_label, show_grid=True,
+            hooks=[_autohide_toolbar_hook, _legend_mute_hook],
+        ),
+        hv.opts.Curve(tools=["hover"]),
+    )
+
+
 def _autohide_toolbar_hook(plot, _element):
     """Let the Bokeh tool palette appear on hover instead of always occupying
     space at the plot's right edge — a cleaner resting state."""
