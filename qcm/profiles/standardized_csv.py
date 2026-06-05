@@ -41,13 +41,21 @@ def is_standardized_csv(path: str | Path) -> bool:
     return bool(_overtones(header))
 
 
-def read_standardized_csv(path: str | Path) -> pl.DataFrame:
+def read_standardized_csv(
+    path: str | Path, *, rename: dict[str, str] | None = None,
+) -> pl.DataFrame:
     """Read a standardized QCM csv into the canonical long-form QCM frame.
 
     Returns columns ``timestamp, sequence, group, fit_center, fit_fwhm,
     frequency``. Raises ``ValueError`` when no ``Fr_N``/``D_N`` pairs are found.
+
+    ``rename`` maps actual column names in a *variant* export onto the canonical
+    ``Time_N``/``Fr_N``/``D_N`` names (e.g. ``{"Frequency_1": "Fr_1"}``), so a
+    renamed-column file imports by adjusting the mapping rather than the code.
     """
     raw = pl.read_csv(path, infer_schema_length=10_000)
+    if rename:
+        raw = raw.rename({k: v for k, v in rename.items() if k in raw.columns})
     columns = raw.columns
     overtones = _overtones(columns)
     if not overtones:
