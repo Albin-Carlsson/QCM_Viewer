@@ -250,3 +250,36 @@ def test_import_detect_readout(tmp_path):
     junk = tmp_path / "junk.csv"
     junk.write_text("a,b\n1,2\n", encoding="utf-8")
     assert "No profile matched" in sh._detected_profile_html([str(junk)], "auto").object
+
+
+def test_column_role_guess_and_rename(tmp_path):
+    from qcm.viz.app import QCMViewer
+
+    a = _make_run(tmp_path, "run_a", f0=5_000_000.0)
+    sh = QCMViewer([a]).shell
+    assert sh._guess_role("Frequency_1") == "Fr_1"
+    assert sh._guess_role("Diss_1") == "D_1"
+    assert sh._guess_role("t_1") == "Time_1"
+    assert sh._guess_role("notes") == "(ignore)"
+    # Only assigned columns end up in the rename map.
+    rename = sh._build_rename({"t_1": "Time_1", "Frequency_1": "Fr_1", "notes": "(ignore)"})
+    assert rename == {"t_1": "Time_1", "Frequency_1": "Fr_1"}
+
+
+def test_add_run_with_column_mapping_imports_variant(tmp_path):
+    """A renamed-column CSV imports through the run manager via the map editor."""
+    from qcm.viz.app import QCMViewer
+
+    a = _make_run(tmp_path, "run_a", f0=5_000_000.0)
+    viewer = QCMViewer([a])
+    variant = tmp_path / "variant.csv"
+    t = np.round(np.arange(20) * 0.5, 3)
+    pl.DataFrame({
+        "t_1": t, "Frequency_1": np.full(20, 5_000_000.0), "Diss_1": np.full(20, 500.0),
+    }).write_csv(variant)
+
+    rename = {"t_1": "Time_1", "Frequency_1": "Fr_1", "Diss_1": "D_1"}
+    n0 = len(viewer.runset.runs)
+    viewer.shell._on_add_run([str(variant)], override="map", rename=rename)
+    assert len(viewer.runset.runs) == n0 + 1
+    assert 1 in viewer.runset.runs[-1].info.groups

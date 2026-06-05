@@ -239,7 +239,30 @@ class ViewerShell:
         "Auto-detect": "auto",
         "Standardized QCM CSV": "standardized_csv",
         "Qsoft .txt": "qsoft_txt",
+        "Map columns (variant CSV)…": "map",
     }
+    _IGNORE_ROLE = "(ignore)"
+    # Canonical roles a variant column can be mapped to (Time/Fr/D per overtone).
+    _CANONICAL_ROLES = [_IGNORE_ROLE] + [
+        f"{role}_{n}" for n in (1, 3, 5, 7, 9, 11, 13) for role in ("Time", "Fr", "D")
+    ]
+
+    @classmethod
+    def _guess_role(cls, name: str) -> str:
+        """Best-guess canonical role for a variant column name (n=1 default)."""
+        low = name.lower()
+        if "freq" in low or "fr" in low:
+            return "Fr_1"
+        if "diss" in low or low.startswith("d"):
+            return "D_1"
+        if "time" in low or low.startswith("t"):
+            return "Time_1"
+        return cls._IGNORE_ROLE
+
+    @classmethod
+    def _build_rename(cls, assignments: dict[str, str]) -> dict[str, str]:
+        """actual→canonical rename map from role assignments, dropping ignores."""
+        return {col: role for col, role in assignments.items() if role != cls._IGNORE_ROLE}
 
     def _build_add_run_modal(self):
         root = str(self.runset.active.run.path.parent)
@@ -252,16 +275,21 @@ class ViewerShell:
         self._profile_override = pn.widgets.Select(
             name="Profile", options=self._OVERRIDE_OPTIONS, value="auto", sizing_mode="stretch_width",
         )
+        # Holds one Select per file column while the mapping editor is shown.
+        self._col_role_selects: dict[str, pn.widgets.Select] = {}
         add = pn.widgets.Button(name="Import & add", icon="plus", button_type="primary")
         add.on_click(lambda _e: self._confirm_add_run())
         detected = pn.bind(self._detected_profile_html, self._run_browser.param.value,
                            self._profile_override)
+        mapping = pn.bind(self._column_mapping_editor, self._run_browser.param.value,
+                          self._profile_override)
         return pn.Modal(
             pn.pane.HTML("<div class='qcm-drawer-title'>Add a run to the overlay</div>", margin=0),
             pn.pane.HTML("<div class='eyebrow'>Run directory or instrument file</div>", margin=0),
             self._run_browser,
             pn.Row(self._profile_override, pn.Column(detected, margin=0, sizing_mode="stretch_width"),
                    margin=0, sizing_mode="stretch_width", css_classes=["qcm-import-detect"]),
+            pn.Column(mapping, margin=0, sizing_mode="stretch_width"),
             pn.Card(
                 pn.pane.HTML("<div class='eyebrow'>Pair a potentiostat (PSTrace) export — CV or CP</div>", margin=0),
                 self._ps_browser,
@@ -271,6 +299,10 @@ class ViewerShell:
             pn.Row(pn.layout.HSpacer(), add, margin=0, sizing_mode="stretch_width"),
             width=760, show_close_button=True, background_close=True,
             margin=0, css_classes=["qcm-run-modal"],
+            # Panel's .dialog-content scrolls (overflow:auto) but has no height
+            # cap, so a tall body (two file browsers + mapping editor) runs off
+            # the screen. Cap it to the viewport so it scrolls inside instead.
+            stylesheets=[".dialog-content{max-height:86vh;max-width:94vw;}"],
         )
 
     @staticmethod
@@ -286,6 +318,8 @@ class ViewerShell:
         path = Path(p)
         if path.is_dir() and (path / "manifest.json").exists():
             return pn.pane.HTML("<div class='qcm-import-ok'>✓ Ingested run — loads directly</div>")
+        if override == "map":
+            return pn.pane.HTML("<div class='qcm-import-msg'>Map the columns below, then import.</div>")
         if override != "auto":
             return pn.pane.HTML(
                 f"<div class='qcm-import-ok'>Forcing profile: "
@@ -302,12 +336,49 @@ class ViewerShell:
         return pn.pane.HTML(
             f"<div class='qcm-import-ok'>✓ Detected: {escape(self._PROFILE_LABELS.get(name, name))}</div>")
 
+    def _column_mapping_editor(self, value, override):
+        """Per-column role pickers shown when 'Map columns' is chosen.
+
+        Reads the selected CSV's header and offers a canonical-role dropdown per
+        column (pre-filled with a best guess). The chosen assignments become the
+        ``qcm_rename`` map at import time, so a renamed-column variant imports
+        without code changes.
+        """
+        self._col_role_selects = {}
+        if override != "map":
+            return pn.Spacer(height=0)
+        p = self._first_path(value)
+        if not p or Path(p).suffix.lower() != ".csv":
+            return pn.pane.HTML("<div class='qcm-import-msg'>Select a CSV file to map its columns.</div>")
+        try:
+            import polars as pl
+            columns = pl.read_csv(p, n_rows=0).columns
+        except Exception as exc:  # noqa: BLE001
+            return pn.pane.HTML(f"<div class='qcm-import-warn'>⚠ Could not read columns: {escape(str(exc))}</div>")
+        rows = [pn.pane.HTML("<div class='eyebrow'>Map each column to a canonical role</div>", margin=0)]
+        for col in columns:
+            sel = pn.widgets.Select(
+                options=self._CANONICAL_ROLES, value=self._guess_role(col),
+                width=150, margin=0,
+            )
+            self._col_role_selects[col] = sel
+            rows.append(pn.Row(
+                pn.pane.HTML(f"<div class='qcm-map-col'>{escape(col)}</div>", margin=0),
+                pn.pane.HTML("<div class='qcm-map-arrow'>→</div>", margin=0), sel,
+                margin=0, sizing_mode="stretch_width", css_classes=["qcm-map-row"],
+            ))
+        return pn.Column(*rows, margin=0, sizing_mode="stretch_width", css_classes=["qcm-map-editor"])
+
     def _open_add_run_modal(self) -> None:
         self._run_modal.show()
 
     def _confirm_add_run(self) -> None:
         ps = self._first_path(self._ps_browser.value)
-        self._on_add_run(self._run_browser.value, ps=ps, override=self._profile_override.value)
+        override = self._profile_override.value
+        rename = None
+        if override == "map":
+            rename = self._build_rename({c: s.value for c, s in self._col_role_selects.items()})
+        self._on_add_run(self._run_browser.value, ps=ps, override=override, rename=rename)
         try:
             self._run_modal.hide()
         except Exception:
@@ -323,17 +394,23 @@ class ViewerShell:
         self.actions.notify(f"Active run: {self.runset.labels()[slot]}", "info")
         self._bump_runset()
 
-    def _import_or_load(self, path: Path, ps, override: str) -> None:
+    def _import_or_load(self, path: Path, ps, override: str, rename=None) -> None:
         """Add an already-ingested run dir directly, or import a raw instrument
-        file (auto-detected or forced via ``override``) then add it."""
+        file (auto-detected, forced, or column-mapped via ``override``) then add
+        it. ``rename`` (with override 'map') remaps a variant CSV's columns."""
         if path.is_dir() and (path / "manifest.json").exists():
             self.runset.add_path(path)
             return
+        # 'map' forces the standardized-csv reader with a column rename; 'auto'
+        # lets detection choose; any other value forces that profile by name.
+        profile = None if override in ("auto", "map") else override
+        if override == "map":
+            profile = "standardized_csv"
         dest = Path(tempfile.mkdtemp(prefix="qcm_import_")) / f"{path.stem}_run"
-        import_run(path, dest, profile=(None if override == "auto" else override), ps_source=ps)
+        import_run(path, dest, profile=profile, qcm_rename=rename, ps_source=ps)
         self.runset.add_path(dest)
 
-    def _on_add_run(self, selected, *, ps=None, override: str = "auto") -> None:
+    def _on_add_run(self, selected, *, ps=None, override: str = "auto", rename=None) -> None:
         paths = selected if isinstance(selected, list) else ([selected] if selected else [])
         if not paths:
             self.actions.notify("Pick a run directory or instrument file first.", "warning")
@@ -341,7 +418,7 @@ class ViewerShell:
         added = 0
         for p in paths:
             try:
-                self._import_or_load(Path(p), ps, override)
+                self._import_or_load(Path(p), ps, override, rename=rename)
                 added += 1
             except Exception as exc:  # noqa: BLE001
                 self.actions.notify(f"Could not add ‘{Path(p).name}’: {exc}", "error")

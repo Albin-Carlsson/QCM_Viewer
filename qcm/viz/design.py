@@ -124,6 +124,10 @@ html, body {
 .qcm-import-ok { color: var(--qcm-accent); font-size: 12px; font-weight: 600; }
 .qcm-import-warn { color: #b45309; font-size: 12px; font-weight: 600; }
 .qcm-import-msg { color: var(--qcm-ink-soft); font-size: 12px; }
+.qcm-map-editor { margin-top: var(--qcm-space-2); gap: 4px; max-height: 220px; overflow-y: auto; }
+.qcm-map-row { align-items: center !important; gap: var(--qcm-space-2); }
+.qcm-map-col { font-family: var(--qcm-mono, monospace); font-size: 12px; min-width: 120px; }
+.qcm-map-arrow { color: var(--qcm-ink-soft); }
 
 /* --- content + top bar ----------------------------------------------------- */
 .qcm-content {
