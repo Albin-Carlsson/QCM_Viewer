@@ -24,7 +24,12 @@ from pathlib import Path
 
 from ..ingest import ingest
 from .pstrace_csv import attach_echem, is_pstrace_csv, read_pstrace_csv
-from .pstrace_cv_csv import attach_cv_echem, is_cv_pstrace_csv, read_cv_pstrace_csv
+from .pstrace_cv_csv import (
+    attach_cv_echem,
+    is_cv_pstrace_csv,
+    read_cv_pstrace_csv,
+    scan_rate_from_filename,
+)
 from .qsoft_txt import is_qsoft_txt, read_qsoft_txt
 from .standardized_csv import is_standardized_csv, read_standardized_csv
 
@@ -81,6 +86,7 @@ def import_run(
     qcm_rename: dict[str, str] | None = None,
     ps_source: str | Path | None = None,
     ps_offset_s: float = 0.0,
+    cv_scan_rate: float | None = None,
     overwrite: bool = False,
     raw_part_rows: int = 1_000_000,
     memory_limit: str | None = "4GB",
@@ -135,7 +141,12 @@ def import_run(
         # so it takes its own reader/attach; everything else is the time-indexed
         # CP path. Detecting CV first keeps the CP path untouched.
         if is_cv_pstrace_csv(ps_source):
-            frame = attach_cv_echem(frame, read_cv_pstrace_csv(ps_source))
+            # CV has no time axis: reconstruct it from the scan rate (explicit
+            # override, else parsed from the CV/QCM filename, else the default).
+            rate = (cv_scan_rate
+                    or scan_rate_from_filename(ps_source)
+                    or scan_rate_from_filename(source))
+            frame = attach_cv_echem(frame, read_cv_pstrace_csv(ps_source), scan_rate=rate)
         else:
             frame = attach_echem(frame, read_pstrace_csv(ps_source), offset_s=ps_offset_s)
     with tempfile.TemporaryDirectory() as tmp:

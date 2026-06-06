@@ -89,36 +89,68 @@ def read_cv_pstrace_csv(path: str | Path) -> pl.DataFrame:
     return pl.concat(frames, how="vertical")
 
 
-def attach_cv_echem(qcm_frame: pl.DataFrame, cv: pl.DataFrame) -> pl.DataFrame:
+_SCANRATE_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*mVs", re.IGNORECASE)
+_DEFAULT_SCAN_RATE = 0.025  # V/s — PSTrace's common default when none is known
+
+
+def scan_rate_from_filename(path: str | Path) -> float | None:
+    """Scan rate (V/s) parsed from a ``…25mVs…`` filename, else ``None``."""
+    m = _SCANRATE_RE.search(Path(path).name)
+    if not m:
+        return None
+    try:
+        return float(m.group(1).replace(",", ".")) / 1000.0
+    except ValueError:
+        return None
+
+
+def attach_cv_echem(
+    qcm_frame: pl.DataFrame, cv: pl.DataFrame, *, scan_rate: float | None = None,
+) -> pl.DataFrame:
     """Place a potential-indexed CV dataset onto a QCM run's timestamps.
 
-    A CV export has no time axis, so the scans are laid out in acquisition order
-    (scan ascending, samples in file order) and spread evenly across the QCM
-    run's elapsed span. ``potential``/``current`` are linearly interpolated onto
-    each QCM timestamp; ``cycle`` is taken as a step function (nearest preceding
-    sample) so scan boundaries stay crisp. Signals are broadcast across overtone
-    groups by the timestamp join.
+    A CV export has no time axis, so a time base is reconstructed from the scan
+    rate: within each scan the time advances by ``dt = |ΔV| / scan_rate`` per
+    sample (a constant-rate sweep), and scans are stitched sequentially from
+    ``t=0``. ``potential``/``current`` are linearly interpolated onto each QCM
+    timestamp and ``cycle`` is step-assigned from the real scan boundaries; QCM
+    samples beyond the CV's reconstructed span get no echem (null) rather than a
+    held value. ``scan_rate`` defaults to 0.025 V/s when unknown.
     """
     if qcm_frame.is_empty() or cv.is_empty():
         return qcm_frame
+    rate = float(scan_rate) if scan_rate else _DEFAULT_SCAN_RATE
 
-    ts = qcm_frame.select("timestamp").unique().sort("timestamp")["timestamp"]
-    ts_us = ts.to_numpy()
-    q_elapsed = (ts_us - ts_us.min()) / 1_000_000.0
-    span = float(q_elapsed.max()) or 1.0
-
-    n = cv.height
-    t_cv = np.linspace(0.0, span, n)
+    # Per-sample dt from |ΔV|/rate (first sample of each scan = 0 so scans abut),
+    # cumulated over the file order to give the stitched time base.
+    cv = cv.with_columns(
+        (pl.col("potential").diff().over("cycle").abs().fill_null(0.0) / rate).alias("_dt")
+    ).with_columns(pl.col("_dt").cum_sum().alias("_t"))
+    t_cv = cv["_t"].to_numpy()
     pot = cv["potential"].to_numpy()
     cur = cv["current"].to_numpy()
     cyc = cv["cycle"].to_numpy()
-    # Step-assign the cycle (an integer label can't be linearly interpolated).
-    idx = np.clip(np.searchsorted(t_cv, q_elapsed, side="right") - 1, 0, n - 1)
+    t_end = float(t_cv[-1]) if len(t_cv) else 0.0
 
+    ts = qcm_frame.select("timestamp").unique().sort("timestamp")["timestamp"]
+    ts_us = ts.to_numpy()
+    q = (ts_us - ts_us.min()) / 1_000_000.0
+    inside = q <= t_end + 1e-9
+    idx = np.clip(np.searchsorted(t_cv, q, side="right") - 1, 0, max(len(t_cv) - 1, 0))
+
+    def _masked(values):
+        return pl.Series(np.where(inside, values, np.nan))
+
+    # NaN marks the out-of-span tail; convert to real nulls so downstream
+    # drop_nulls / cycle_stats ignore it (NaN would survive a drop_nulls).
     echem_df = pl.DataFrame({
         "timestamp": ts,
-        "potential": pl.Series("potential", np.interp(q_elapsed, t_cv, pot)),
-        "current": pl.Series("current", np.interp(q_elapsed, t_cv, cur)),
-        "cycle": pl.Series("cycle", cyc[idx]),
-    })
+        "potential": _masked(np.interp(q, t_cv, pot)),
+        "current": _masked(np.interp(q, t_cv, cur)),
+        "cycle": _masked(cyc[idx].astype(float)),
+    }).with_columns(
+        pl.col("potential").fill_nan(None),
+        pl.col("current").fill_nan(None),
+        pl.col("cycle").fill_nan(None).cast(pl.Int64, strict=False),
+    )
     return qcm_frame.join(echem_df, on="timestamp", how="left")

@@ -158,3 +158,30 @@ def test_cv_detection_rejects_cp_export(tmp_path):
     ])
     cp.write_bytes(text.encode("utf-16"))
     assert not is_cv_pstrace_csv(cp)
+
+
+def test_attach_cv_echem_scan_rate_nulls_tail():
+    # 2 scans x 3 samples, ΔV=0.1 V steps, scan_rate 0.05 V/s -> dt=2 s/step,
+    # so the CV spans ~8 s; the QCM runs to 15 s -> the tail is null.
+    cv = pl.DataFrame({
+        "cycle": [1, 1, 1, 2, 2, 2],
+        "potential": [-0.2, -0.3, -0.4, -0.2, -0.3, -0.4],
+        "current": [1e-4] * 6,
+    })
+    qcm = pl.DataFrame({"timestamp": [i * 1_000_000 for i in range(16)], "group": [1] * 16})
+    out = attach_cv_echem(qcm, cv, scan_rate=0.05)
+    el = out.with_columns(((pl.col("timestamp") - pl.col("timestamp").min()) / 1e6).alias("s"))
+    # CV present within its reconstructed span, null beyond it (no clamp artifact).
+    assert el.filter(pl.col("s") <= 8)["potential"].null_count() == 0
+    tail = el.filter(pl.col("s") > 9)
+    assert tail["potential"].null_count() == tail.height
+    # Cycles placed at real (scan-rate) boundaries.
+    assert sorted(el["cycle"].drop_nulls().unique().to_list()) == [1, 2]
+    assert el.filter(pl.col("s") < 3)["cycle"].drop_nulls().unique().to_list() == [1]
+
+
+def test_scan_rate_from_filename():
+    from qcm.profiles.pstrace_cv_csv import scan_rate_from_filename
+    assert scan_rate_from_filename("CV_-1050mV_-200mV_25mVs.csv") == 0.025
+    assert scan_rate_from_filename("foo_100mVs_PS.csv") == 0.1
+    assert scan_rate_from_filename("no_rate_here.csv") is None
