@@ -110,3 +110,40 @@ def test_cycle_overlay_runs_curve_per_run_and_cycle():
     plot = plots.cycle_overlay_runs(frame, quantity("delta_f_norm"), "cycles")
     curves = [e for e in plot.values() if isinstance(e, hv.Curve)]
     assert len(curves) == 4  # 2 runs x 2 cycles
+
+
+def test_cycle_trend_marker_per_run_and_series():
+    import holoviews as hv
+    rows = []
+    for slot, run in [(0, "A"), (1, "B")]:
+        for c in (1, 2, 3):
+            rows.append({"run": run, "run_slot": slot, "cycle": c,
+                         "MPE_plating_g_per_mol": 32.0 + c, "MPE_stripping_g_per_mol": 31.0 + c})
+    frame = pl.DataFrame(rows)
+    plot = plots.cycle_trend(
+        frame,
+        series=[("MPE_plating_g_per_mol", "plating", "circle"),
+                ("MPE_stripping_g_per_mol", "stripping", "triangle")],
+        ylabel="MPE (g/mol)", title="MPE vs cycle", target=32.69,
+    )
+    scatters = [e for e in plot.values() if isinstance(e, hv.Scatter)]
+    assert len(scatters) == 4  # 2 runs x 2 series
+    # target line present
+    assert any(isinstance(e, hv.HLine) for e in plot.values())
+
+
+def test_multi_augmented_has_mpe_and_ce(tmp_path):
+    # Build two CP runs via the viewer and check the augmented frame the trend reads.
+    import json, shutil
+    from qcm.viz.app import QCMViewer
+    src = "/tmp/real-echem-run"
+    import os
+    if not os.path.isdir(src):
+        import pytest; pytest.skip("real CP run missing")
+    d2 = tmp_path / "run2"
+    shutil.copytree(src, d2)
+    m = d2 / "manifest.json"; j = json.load(open(m)); j["run_id"] = "run2"; json.dump(j, open(m, "w"))
+    v = QCMViewer([src, str(d2)])
+    f = v.shell._results._multi_augmented(filtered=False)
+    assert {"run", "cycle", "MPE_plating_g_per_mol", "MPE_stripping_g_per_mol", "CE_time"}.issubset(f.columns)
+    assert f["run"].n_unique() == 2

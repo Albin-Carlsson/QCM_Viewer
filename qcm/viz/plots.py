@@ -380,6 +380,71 @@ def timeline(
     )
 
 
+def cycle_trend(
+    frame: pl.DataFrame,
+    *,
+    series: list[tuple[str, str, str]],
+    ylabel: str,
+    title: str,
+    target: float | None = None,
+    target_label: str | None = None,
+    ylim: tuple[float, float] | None = None,
+    height: int = PLOT_HEIGHT,
+):
+    """Per-cycle trend: one marker+line per (run, series) vs cycle number.
+
+    ``frame`` carries ``run``/``run_slot``, ``cycle`` and the series value columns.
+    ``series`` is ``[(column, label, marker), …]`` (e.g. plating/stripping). Run =
+    hue family; series within a run are shades + distinct markers/dash, so the
+    same series compares across runs by colour family. An optional ``target``
+    draws a horizontal reference line (e.g. the M/z MPE target).
+    """
+    if frame.is_empty() or "run_slot" not in frame.columns:
+        return empty(f"No {ylabel} data")
+    elements: list = []
+    if target is not None:
+        elements.append(
+            hv.HLine(float(target)).opts(color=EVENT_COLOR, line_dash="dashed", line_width=1.4)
+        )
+    drew = False
+    for slot in sorted(int(s) for s in frame["run_slot"].unique().to_list()):
+        sub_run = frame.filter(pl.col("run_slot") == slot)
+        label = str(sub_run["run"][0])
+        for sidx, (col, sname, marker) in enumerate(series):
+            if col not in sub_run.columns:
+                continue
+            d = sub_run.select(["cycle", col]).drop_nulls().sort("cycle")
+            if d.is_empty():
+                continue
+            x, y = d["cycle"].to_numpy(), d[col].to_numpy()
+            color = color_for_run_overtone(slot, sidx)
+            name = f"{label} · {sname}" if len(series) > 1 else label
+            dash = "solid" if sidx == 0 else "dashed"
+            elements.append(
+                hv.Curve((x, y), "Cycle", ylabel, label=name).opts(
+                    color=color, line_width=1.4, line_dash=dash)
+            )
+            elements.append(
+                hv.Scatter((x, y), "Cycle", ylabel, label=name).opts(
+                    color=color, marker=marker, size=6)
+            )
+            drew = True
+    if not drew:
+        return empty(f"No {ylabel} data")
+    overlay_opts = dict(
+        title=title, height=height, responsive=True, legend_position="right",
+        xlabel="Cycle number", ylabel=ylabel, show_grid=True,
+        hooks=[_autohide_toolbar_hook, _legend_mute_hook],
+    )
+    if ylim is not None:
+        overlay_opts["ylim"] = ylim
+    return hv.Overlay(elements).opts(
+        hv.opts.Overlay(**overlay_opts),
+        hv.opts.Curve(tools=["hover"]),
+        hv.opts.Scatter(tools=["hover"]),
+    )
+
+
 def cycle_overlay_runs(frame: pl.DataFrame, q: Quantity, title: str, height: int = PLOT_HEIGHT):
     """Multi-run cycle overlay: each cycle of each run on a common origin.
 

@@ -123,11 +123,11 @@ class ResultsStep(BaseStep):
     def _cycle_source(self) -> pl.DataFrame:
         return self._cycle_source_for(self.data)
 
-    def _selected_waveform(self) -> pl.DataFrame:
-        wf = self.data.echem_waveform()
+    def _selected_waveform_for(self, data) -> pl.DataFrame:
+        wf = data.echem_waveform()
         if wf.is_empty():
             return wf
-        if self._technique() == "cp":
+        if echem.resolve_technique(wf, self.technique_select.value) == "cp":
             wf = echem.derive_cycles(wf)
         wf = echem.filter_cycles(
             wf, self.cycle_mode.value,
@@ -138,6 +138,9 @@ class ResultsStep(BaseStep):
         if _I in wf.columns:
             wf = wf.with_columns((pl.col(_I) / ELECTRODE_AREA_CM2).alias(_J))
         return wf
+
+    def _selected_waveform(self) -> pl.DataFrame:
+        return self._selected_waveform_for(self.data)
 
     # --- aggregation -------------------------------------------------------
     def _means(self, state) -> dict[str, float | None]:
@@ -253,26 +256,29 @@ class ResultsStep(BaseStep):
         )
 
     # --- per-cycle table ---------------------------------------------------
-    def _augment_with_mpe(self, stats: pl.DataFrame) -> pl.DataFrame:
-        """Add per-cycle mass accumulation and MPE columns.
+    def _augment_with_mpe(self, stats: pl.DataFrame, data=None, wf=None) -> pl.DataFrame:
+        """Add per-cycle mass accumulation and MPE columns for one run.
 
         MPE is the Faraday slope of areal-mass change vs charge over an interval,
         ``F · Δm(g) / Δq``, using the run's configured electrode area. The
         whole-cycle value is always added; for CP, the plating and stripping
         half-cycles (from the current-sign markers) each get their own static
-        MPE column.
+        MPE column. ``data``/``wf`` default to the active run's selected waveform;
+        pass a specific run's data + waveform to augment another run (or the full,
+        unfiltered waveform for the all-cycles trend).
         """
         try:
             if stats.is_empty() or "cycle" not in stats.columns:
                 return stats
+            data = data or self.data
             state = self.controls.state()
             area = state.params.area_cm2
-            full = replace(state, t_range_s=(0.0, float(self.data.info.span_s)))
-            mdf, _ = self.data.value_df(full, "sauerbrey_mass", "time")
+            full = replace(state, t_range_s=(0.0, float(data.info.span_s)))
+            mdf, _ = data.value_df(full, "sauerbrey_mass", "time")
             if mdf.is_empty():
                 return stats
             mass_ts = mdf.group_by("timestamp").agg(pl.col("value").mean().alias("_mass"))
-            wf = self._selected_waveform()
+            wf = self._selected_waveform_for(data) if wf is None else wf
             if wf.is_empty() or _Q not in wf.columns or "cycle" not in wf.columns:
                 return stats
             has_half = "_is_plate" in wf.columns
@@ -309,6 +315,105 @@ class ResultsStep(BaseStep):
             return out
         except Exception:
             return stats
+
+    def _run_augmented_stats(self, data) -> pl.DataFrame:
+        """All-cycle per-cycle stats (CE + whole/half-cycle MPE + mass) for one run.
+
+        Computed over the full waveform so cycle numbers stay stable; callers
+        filter the rows afterwards (the table) or use them whole (the trend).
+        """
+        wf = data.echem_waveform()
+        if wf.is_empty():
+            return pl.DataFrame()
+        tech = echem.resolve_technique(wf, self.technique_select.value)
+        stats = echem.cycle_stats(wf, tech)
+        if stats.is_empty():
+            return stats
+        return self._augment_with_mpe(stats, data=data, wf=self._cycle_source_for(data))
+
+    def _multi_augmented(self, *, filtered: bool) -> pl.DataFrame:
+        """Per-run augmented cycle stats stacked with ``run``/``run_slot``.
+
+        ``filtered`` applies the shared cycle selection to the stats rows (for the
+        table); the trend passes ``filtered=False`` to show every cycle.
+        """
+        rs = self._runset()
+        runs = rs.runs if rs is not None else [self.data]
+        labels = rs.labels() if rs is not None else [self.data.info.run_id]
+        frames: list[pl.DataFrame] = []
+        for slot, d in enumerate(runs):
+            stats = self._run_augmented_stats(d)
+            if stats.is_empty():
+                continue
+            if filtered:
+                stats = echem.filter_cycles(
+                    stats, self.cycle_mode.value,
+                    cycle=int(self.cycle_select.value),
+                    lo=int(self.cycle_range.value[0]), hi=int(self.cycle_range.value[1]),
+                )
+                if stats.is_empty():
+                    continue
+            frames.append(stats.with_columns(
+                pl.lit(labels[slot]).alias("run"),
+                pl.lit(slot, dtype=pl.Int32).alias("run_slot"),
+            ))
+        if not frames:
+            return pl.DataFrame()
+        return pl.concat(frames, how="diagonal_relaxed")
+
+    @staticmethod
+    def _robust_ylim(frame: pl.DataFrame, cols, *, include=None):
+        """A y-range from the 2nd–98th percentile (+pad) so a single bad cycle
+        (e.g. an incomplete final half-cycle) can't blow out the scale."""
+        import numpy as np
+        vals = []
+        for c in cols:
+            if c in frame.columns:
+                vals.append(frame[c].drop_nulls().to_numpy())
+        vals = np.concatenate(vals) if vals else np.array([])
+        vals = vals[np.isfinite(vals)]
+        if vals.size < 2:
+            return None
+        lo, hi = (float(v) for v in np.percentile(vals, [2, 98]))
+        if include is not None:
+            lo, hi = min(lo, float(include)), max(hi, float(include))
+        pad = (hi - lo) * 0.1 or 1.0
+        return (lo - pad, hi + pad)
+
+    def mpe_trend_plot(self, height: int = PLOT_HEIGHT):
+        """MPE (plating + stripping) vs cycle number across runs, with M/z target."""
+        try:
+            frame = self._multi_augmented(filtered=False)
+            if frame.is_empty() or "MPE_plating_g_per_mol" not in frame.columns:
+                return self.empty_state("Per-cycle MPE needs a CP run with plating/stripping cycles.")
+            target = self.controls.state().params.target_mpe
+            ylim = self._robust_ylim(
+                frame, ["MPE_plating_g_per_mol", "MPE_stripping_g_per_mol"], include=target)
+            plot = plots.cycle_trend(
+                frame,
+                series=[("MPE_plating_g_per_mol", "plating", "circle"),
+                        ("MPE_stripping_g_per_mol", "stripping", "triangle")],
+                ylabel="MPE (g/mol)", title="MPE per cycle", target=target, ylim=ylim, height=height,
+            )
+            return self.nearest_hover(self.force_plot_height(plot, height))
+        except Exception as exc:  # pragma: no cover
+            return pn.pane.Alert(f"MPE trend failed: {exc}", alert_type="danger")
+
+    def ce_trend_plot(self, height: int = PLOT_HEIGHT):
+        """Coulombic efficiency (t_strip/t_plate × 100) vs cycle number across runs."""
+        try:
+            frame = self._multi_augmented(filtered=False)
+            if frame.is_empty() or "CE_time" not in frame.columns:
+                return self.empty_state("Coulombic efficiency needs a CP run.")
+            frame = frame.with_columns((pl.col("CE_time") * 100.0).alias("CE_pct"))
+            ylim = self._robust_ylim(frame, ["CE_pct"])
+            plot = plots.cycle_trend(
+                frame, series=[("CE_pct", "CE", "x")],
+                ylabel="Coulombic Efficiency (%)", title="CE per cycle", ylim=ylim, height=height,
+            )
+            return self.nearest_hover(self.force_plot_height(plot, height))
+        except Exception as exc:  # pragma: no cover
+            return pn.pane.Alert(f"CE trend failed: {exc}", alert_type="danger")
 
     def _run_cycle_rel(self, data, state, q, zero: bool) -> pl.DataFrame:
         """Cycle-relative ``[timestamp, cycle, t_rel_s, value]`` for one run over
@@ -371,7 +476,7 @@ class ResultsStep(BaseStep):
             if not self.data.has_echem():
                 return self.empty_state("This run has no electrochemistry channel, so per-cycle results are unavailable.")
             if self._is_multi():
-                stats = echem.overlay_cycle_stats(self._named_waveforms(), **self._cycle_kwargs())
+                stats = self._multi_augmented(filtered=True)
                 if stats.is_empty():
                     return self.empty_state("No cycles in the current selection.")
                 # Lead with the run label; drop the colour-slot helper column.
@@ -526,5 +631,13 @@ class ResultsStep(BaseStep):
             self.panel(lambda: self.cycle_overlay_plot(), *sig, *cyc, rv, self.controls.plot_reset_version,
                        title="Cycle overlay", controls=pn.Row(self.cycle_zero, margin=0)),
             self.panel(self.per_cycle_table, *sig, *cyc, rv, title="Per-cycle summary"),
+            # MPE / CE trends vs cycle (CP only — the plots self-gate for CV).
+            pn.Row(
+                self.panel(lambda: self.mpe_trend_plot(height=PLOT_HEIGHT), *sig, *cyc, rv,
+                           self.controls.plot_reset_version, title="MPE per cycle"),
+                self.panel(lambda: self.ce_trend_plot(height=PLOT_HEIGHT), *sig, *cyc, rv,
+                           self.controls.plot_reset_version, title="Coulombic efficiency per cycle"),
+                margin=0, sizing_mode="stretch_width", css_classes=["qcm-results-plotrow"],
+            ),
         ]
         return pn.Column(*rows, margin=0, sizing_mode="stretch_width", css_classes=["qcm-page-results"])
