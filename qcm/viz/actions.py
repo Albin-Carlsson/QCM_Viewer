@@ -8,6 +8,7 @@ from .controls import ViewerControls
 from .data import QCMViewData
 from .design import ACCENT_BUTTON_STYLESHEET
 from .state import RunInfo
+from .theme import axis
 
 _US = 1_000_000
 
@@ -202,13 +203,24 @@ class ViewerActions:
         if not boundsx:
             return
         try:
-            lo, hi = (float(v) for v in boundsx)
+            lo, hi = sorted(float(v) for v in boundsx)
         except (TypeError, ValueError):
             return
-        if lo > hi:
-            lo, hi = hi, lo
         if abs(hi - lo) < 1e-9:
             return
+        # On a non-time (but monotonic, e.g. cycle-number) x-axis the brush is in
+        # that unit; map it to the enclosing analysis time window. The selection
+        # state is always seconds, so everything downstream is unchanged.
+        x_axis = getattr(self.controls.state(), "x_axis", "time")
+        x_note = ""
+        if x_axis != "time":
+            window = self.data.time_window_for_x(x_axis, lo, hi)
+            if window is None:
+                self.notify("No data in the selected range.", "warning")
+                return
+            ax = axis(x_axis)
+            x_note = f" ({ax.label.lower()} {lo:g}–{hi:g} {ax.unit})".rstrip()
+            lo, hi = window
         mode = self.controls.brush_mode.value
         if mode == "reference":
             previous = tuple(float(v) for v in self.controls.baseline_range.value)
@@ -216,13 +228,13 @@ class ViewerActions:
                 self.controls._last_baseline = previous
                 self.controls.revert_baseline.disabled = False
             self.controls.set_reference_range_values(lo, hi)
-            self.notify(f"Reference range set to {lo:,.2f}–{hi:,.2f} s.", "success")
+            self.notify(f"Reference range set to {lo:,.2f}–{hi:,.2f} s{x_note}.", "success")
         elif mode == "mark":
             self.controls.set_mark_range_values(lo, hi)
-            self.notify(f"Mark range set to {lo:,.2f}–{hi:,.2f} s. Name it and save phase.", "success")
+            self.notify(f"Mark range set to {lo:,.2f}–{hi:,.2f} s{x_note}. Name it and save phase.", "success")
         else:
             self.controls.set_current_range_values(lo, hi)
-            self.notify(f"Analysis range set to {lo:,.2f}–{hi:,.2f} s.", "success")
+            self.notify(f"Analysis range set to {lo:,.2f}–{hi:,.2f} s{x_note}.", "success")
 
     def jump_to_seconds(self, seconds) -> None:
         if seconds is None:

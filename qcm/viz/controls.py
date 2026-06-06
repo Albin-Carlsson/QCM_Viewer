@@ -307,6 +307,9 @@ class ViewerControls:
             value=x_value,
             sizing_mode="stretch_width",
             css_classes=["compact-select", "x-axis-select"],
+            description=("Drag-select a range on the Time or Cycle-number axis to set the "
+                         "analysis window. Potential/charge axes sweep back and forth, so a "
+                         "drag has no single window and selection is disabled there."),
         )
         self.quantity_select = pn.widgets.Select(
             name="",

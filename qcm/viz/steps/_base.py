@@ -359,7 +359,7 @@ class BaseStep:
                 baseline=state.baseline_s if (q.referenced and window != "reference") else None,
                 window=win,
                 annotation_spans=spans,
-                select_x=ax.is_time,
+                select_x=ax.monotonic,
                 height=height,
                 show_legend=show_legend,
                 cycle_spans=cycle_spans,
@@ -402,9 +402,15 @@ class BaseStep:
             ))
         except Exception:
             pass
+        sized = self.force_plot_height(plot, height)
         if ax.is_time:
-            return self.interactive_plot(self.force_plot_height(plot, height))
-        return self.nearest_hover(self.force_plot_height(plot, height))
+            # Time gets the full interaction: drag-select a window + click-to-jump.
+            return self.interactive_plot(sized)
+        if ax.monotonic:
+            # Other monotonic axes (cycle number) support drag-select only — a tap
+            # maps to seconds, which is meaningless off the time axis.
+            return self.attach_brush(self.nearest_hover(sized))
+        return self.nearest_hover(sized)
 
     def _overlay_anchor(self, state, ax, q, full, window: str, height: int, show_legend: bool):
         """Hero plot for a multi-run set: every run overlaid on one quantity.
@@ -442,7 +448,7 @@ class BaseStep:
             window=win,
             annotation_spans=spans,
             cycle_spans=cycle_spans,
-            select_x=ax.is_time,
+            select_x=ax.monotonic,
             height=height,
             show_legend=show_legend,
             target=(state.params.target_mpe

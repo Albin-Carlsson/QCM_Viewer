@@ -108,6 +108,11 @@ class QCMViewData:
             return out.with_columns(pl.lit(None, dtype=pl.Float64).alias("x"))
         if ax.is_time:
             return out.with_columns(pl.col(plots.X).cast(pl.Float64).alias("x"))
+        if ax.source == "cycle":
+            # CP cycles are derived from current sign, not stored, so build the
+            # cycle-per-timestamp map from the (derived) echem waveform rather
+            # than querying a column that may not exist.
+            return self._attach_cycle_x(out)
         xdf = self._timeline((ax.source,), t0, t1, groups)
         if xdf.is_empty() or ax.source not in xdf.columns:
             return out.with_columns(pl.lit(None, dtype=pl.Float64).alias("x"))
@@ -120,6 +125,57 @@ class QCMViewData:
             .unique(subset=["timestamp", "group"], keep="first")
         )
         return out.join(xdf, on=["timestamp", "group"], how="left")
+
+    def _cycle_by_timestamp(self) -> pl.DataFrame:
+        """``[timestamp, cycle]`` from the echem waveform, deriving CP cycles."""
+        wf = self.echem_waveform()
+        if not wf.is_empty() and echem.detect_technique(wf) == "cp":
+            wf = echem.derive_cycles(wf)
+        if wf.is_empty() or "cycle" not in wf.columns or "timestamp" not in wf.columns:
+            return pl.DataFrame()
+        return wf.select(["timestamp", "cycle"]).drop_nulls("cycle").unique(subset=["timestamp"])
+
+    def _attach_cycle_x(self, out: pl.DataFrame) -> pl.DataFrame:
+        cyc = self._cycle_by_timestamp()
+        if cyc.is_empty():
+            return out.with_columns(pl.lit(None, dtype=pl.Float64).alias("x"))
+        cyc = cyc.select(["timestamp", pl.col("cycle").cast(pl.Float64).alias("x")])
+        return out.join(cyc, on="timestamp", how="left")
+
+    def time_window_for_x(self, x_axis: str, x0: float, x1: float) -> tuple[float, float] | None:
+        """Elapsed-seconds window enclosing the rows whose x-axis value is in
+        ``[x0, x1]``. Drives drag-select on non-time axes: a brushed range on a
+        monotonic axis (e.g. cycle number) maps to the analysis time window.
+
+        Time is the identity. Other axes read their source column over the full
+        run and return the min/max timestamp (as elapsed seconds) of the rows in
+        range, or ``None`` when nothing matches.
+        """
+        ax = axis(x_axis)
+        lo, hi = sorted((float(x0), float(x1)))
+        if ax.is_time:
+            return (lo, hi)
+        if x_axis == "cycle_number":
+            # CP cycles are derived (not stored); snap the brushed bounds to the
+            # cycles they touch and return their enclosing time window.
+            cyc = self._cycle_by_timestamp()
+            if cyc.is_empty():
+                return None
+            sel = cyc.filter((pl.col("cycle") >= round(lo)) & (pl.col("cycle") <= round(hi)))
+            if sel.is_empty():
+                return None
+            t_lo = (int(sel["timestamp"].min()) - self.info.t0_us) / _US
+            t_hi = (int(sel["timestamp"].max()) - self.info.t0_us) / _US
+            return (t_lo, t_hi)
+        df = self._timeline((ax.source,), self.info.t0_us, self.info.t1_us, ())
+        if df.is_empty() or ax.source not in df.columns or "timestamp" not in df.columns:
+            return None
+        sel = df.filter((pl.col(ax.source) >= lo) & (pl.col(ax.source) <= hi)).drop_nulls(ax.source)
+        if sel.is_empty():
+            return None
+        t_lo = (int(sel["timestamp"].min()) - self.info.t0_us) / _US
+        t_hi = (int(sel["timestamp"].max()) - self.info.t0_us) / _US
+        return (t_lo, t_hi)
 
     def qcmd_frames(self, state: ViewState) -> tuple[pl.DataFrame, pl.DataFrame]:
         norm_df, _ = self.value_df(state, "delta_f_norm")

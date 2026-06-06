@@ -147,3 +147,21 @@ def test_multi_augmented_has_mpe_and_ce(tmp_path):
     f = v.shell._results._multi_augmented(filtered=False)
     assert {"run", "cycle", "MPE_plating_g_per_mol", "MPE_stripping_g_per_mol", "CE_time"}.issubset(f.columns)
     assert f["run"].n_unique() == 2
+
+
+def test_time_window_for_x_cycle_number(tmp_path):
+    import os
+    if not os.path.isdir("/tmp/real-echem-run"):
+        import pytest; pytest.skip("real CP run missing")
+    from qcm.viz.runset import load_run
+    d = load_run("/tmp/real-echem-run")
+    # time axis is identity
+    assert d.time_window_for_x("time", 10.0, 20.0) == (10.0, 20.0)
+    # cycle-number axis maps a cycle range to the enclosing time window
+    win = d.time_window_for_x("cycle_number", 5, 8)
+    assert win is not None
+    lo, hi = win
+    assert 0.0 <= lo < hi <= d.info.span_s
+    # a higher cycle range starts later in time
+    win2 = d.time_window_for_x("cycle_number", 20, 23)
+    assert win2 is not None and win2[0] > lo
