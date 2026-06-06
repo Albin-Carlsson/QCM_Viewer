@@ -39,7 +39,7 @@ from .components import (
 from .controls import ViewerControls
 from .data import QCMViewData
 from .state import RunInfo
-from .theme import ELECTRODE_AREA_CM2, HERO_HEIGHT
+from .theme import ELECTRODE_AREA_CM2, HERO_HEIGHT, area_to_diameter_mm
 from .tokens import (
     PHASE_COLORS as _PHASE_COLORS,
     PHASE_DEFAULT as _PHASE_DEFAULT,
@@ -142,6 +142,11 @@ class ViewerShell:
         except Exception:
             pass
         overtones = ", ".join(str(n) for n in sorted(set(self.info.orders.values()))) or "—"
+        # The active run's configured area (falls back to the default constant).
+        try:
+            _area = float(self.controls.params().area_cm2)
+        except Exception:
+            _area = ELECTRODE_AREA_CM2
         rows = [("Run", str(self.info.run_id))]
         date = meta.get("date") or meta.get("started_at") or meta.get("timestamp")
         if date:
@@ -150,7 +155,7 @@ class ViewerShell:
             ("Duration", f"{self.info.span_s:,.2f} s"),
             ("Channels", str(len(self.info.groups))),
             ("Overtones", overtones),
-            ("Electrode area", f"{ELECTRODE_AREA_CM2:g} cm²"),
+            ("Electrode area", f"{_area:.3f} cm² (⌀ {area_to_diameter_mm(_area):.1f} mm)"),
         ]
         if meta.get("sample_rate") is not None:
             rows.append(("Sample rate", f"{meta['sample_rate']} Hz"))

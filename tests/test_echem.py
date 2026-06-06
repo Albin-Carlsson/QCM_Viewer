@@ -72,10 +72,11 @@ def test_cv_metadata_values():
 
 
 def test_cp_metadata_values():
+    from qcm.viz.theme import ELECTRODE_AREA_CM2
     meta = echem.cp_metadata(_cp_frame(n_steps=8))
     assert abs(meta["applied_current"] - 5e-5) < 1e-6
-    # Area is 1 cm² by default, so density equals current.
-    assert abs(meta["applied_current_density"] - meta["applied_current"]) < 1e-12
+    # Density = current / electrode area (default disc, ⌀12 mm).
+    assert abs(meta["applied_current_density"] - meta["applied_current"] / ELECTRODE_AREA_CM2) < 1e-12
     assert meta["step_duration"] > 0
     assert meta["n_steps"] >= 1
 

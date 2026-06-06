@@ -18,7 +18,7 @@ from typing import Literal
 import panel as pn
 
 from .state import RunInfo, ViewState, parse_orders
-from .theme import AXES, QUANTITIES, ExperimentParams, quantity
+from .theme import AXES, QUANTITIES, ExperimentParams, area_to_diameter_mm, quantity
 
 _QUANTITY_OPTIONS = {q.label: key for key, q in QUANTITIES.items()}
 _AXIS_OPTIONS = {a.label: key for key, a in AXES.items()}
@@ -631,8 +631,14 @@ class ViewerControls:
             return pn.pane.HTML(
                 f"<div class='param-target'><b>Target MPE (M / z):</b> {txt}</div>", margin=0,
             )
+        def geom(*_):
+            d_mm = area_to_diameter_mm(self._safe_float(self.param_area.value, 0.0))
+            return pn.pane.HTML(
+                f"<div class='param-geom'>= ⌀ {d_mm:.1f} mm disc</div>", margin=0,
+            )
         return pn.Card(
-            self.param_area, self.param_sensitivity, self.param_molar_mass, self.param_valency,
+            self.param_area, pn.bind(geom, self.param_area),
+            self.param_sensitivity, self.param_molar_mass, self.param_valency,
             pn.bind(target, *self.param_inputs),
             title="Experiment parameters",
             collapsible=True, collapsed=True, margin=0, sizing_mode="stretch_width",

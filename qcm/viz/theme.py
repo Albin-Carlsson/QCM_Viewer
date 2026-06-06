@@ -5,6 +5,7 @@ one place so plots and controls never disagree about what a column means.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 # --- look and feel -----------------------------------------------------------
@@ -47,7 +48,18 @@ SAUERBREY_CONSTANT = 17.7
 # (EQCM) channel. The area converts current to current density and areal mass to
 # total mass for the mass-per-electron (MPE) Faraday slope.
 FARADAY_CONSTANT = 96_485.332_12
-ELECTRODE_AREA_CM2 = 1.0
+# Default working-electrode area: a disc of radius 0.6 cm (⌀ 12 mm), the standard
+# EQCM sensor geometry. A wrong area silently scales areal mass, MPE, and current
+# density, so the default matches the real cell rather than a bare 1 cm².
+ELECTRODE_AREA_CM2 = math.pi * 0.6 ** 2  # ≈ 1.1310 cm²
+
+
+def area_to_diameter_mm(area_cm2: float) -> float:
+    """Diameter (mm) of the disc with this area — a sanity cue for the area field."""
+    try:
+        return 2.0 * math.sqrt(max(0.0, float(area_cm2)) / math.pi) * 10.0
+    except (TypeError, ValueError):
+        return 0.0
 
 
 @dataclass(frozen=True)
