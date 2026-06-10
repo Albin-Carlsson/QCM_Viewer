@@ -32,6 +32,7 @@ from ..theme import (
     PLOT_HEIGHT,
     RESULTS_PLOT_HEIGHT,
     axis,
+    potential_axis_label,
     quantity,
 )
 from ._base import BaseStep
@@ -42,7 +43,7 @@ _I = "current"
 _J = "current_density"
 _Q = "charge"
 _T = "time_s"
-_E_LABEL = "Potential [V]"
+_E_LABEL = "Potential [V]"  # default; use ResultsStep._e_label() for the run's reference electrode
 _I_LABEL = "Current [A]"
 _J_LABEL = "Current density [A/cm²]"
 _Q_LABEL = "Charge [C]"
@@ -90,6 +91,10 @@ class ResultsStep(BaseStep):
         if choice in ("cv", "cp"):
             return choice
         return echem.detect_technique(self.data.echem_waveform())
+
+    def _e_label(self) -> str:
+        """Potential axis label annotated with the run's reference electrode."""
+        return potential_axis_label(self.controls.params().reference_electrode)
 
     # --- multi-run helpers -------------------------------------------------
     def _runset(self):
@@ -520,6 +525,7 @@ class ResultsStep(BaseStep):
             # for an absolute signal such as potential.
             zero = bool(self.cycle_zero.value) and q.kind in ("frequency", "dissipation", "mass")
             zsuffix = " · zeroed at start" if zero else ""
+            ylabel = self._e_label() if q.key == "potential" else None
 
             if self._is_multi():
                 frames = []
@@ -535,15 +541,17 @@ class ResultsStep(BaseStep):
                     return self.empty_state("No cycles to overlay.")
                 frame = pl.concat(frames, how="diagonal_relaxed")
                 title = f"{q.label} per cycle · all runs{zsuffix}"
-                plot = self._with_ylim(plots.cycle_overlay_runs(frame, q, title, height=height),
-                                       frame, ["value"])
+                plot = self._with_ylim(
+                    plots.cycle_overlay_runs(frame, q, title, height=height, ylabel=ylabel),
+                    frame, ["value"])
                 return self._own_axes(plot, height)
 
             rel = self._run_cycle_rel(self.data, state, q, zero)
             if rel.is_empty():
                 return self.empty_state("No cycles to overlay.")
             title = f"{q.label} per cycle{zsuffix}"
-            plot = self._with_ylim(plots.cycle_overlay(rel, q, title, height=height), rel, ["value"])
+            plot = self._with_ylim(
+                plots.cycle_overlay(rel, q, title, height=height, ylabel=ylabel), rel, ["value"])
             return self._own_axes(plot, height)
         except Exception as exc:  # pragma: no cover
             return surface_error("Cycle overlay", exc)
@@ -675,21 +683,21 @@ class ResultsStep(BaseStep):
             if self._is_multi():
                 frame = echem.overlay_selected_waveforms(self._named_waveforms(), **self._cycle_kwargs())
                 if cp:
-                    plot = plots.echem_overlay(frame, _T, _E, _T_LABEL, _E_LABEL,
+                    plot = plots.echem_overlay(frame, _T, _E, _T_LABEL, self._e_label(),
                                                "Potential vs time (CP) · all runs",
                                                by_cycle=False, monotonic=True, height=height)
                 else:
-                    plot = plots.echem_overlay(frame, _E, _I, _E_LABEL, _I_LABEL,
+                    plot = plots.echem_overlay(frame, _E, _I, self._e_label(), _I_LABEL,
                                                "Current vs potential (CV) · all runs",
                                                by_cycle=True, monotonic=False, height=height)
                 plot = self._with_ylim(plot, frame, [ycol], pct=ypct)
                 return self._own_axes(plot, height)
             wf = self._selected_waveform()
             if cp:
-                plot = plots.echem_curve(wf, _T, _E, _T_LABEL, _E_LABEL, "Potential vs time (CP)",
+                plot = plots.echem_curve(wf, _T, _E, _T_LABEL, self._e_label(), "Potential vs time (CP)",
                                          by_cycle=False, monotonic=True, height=height, show_legend=False)
             else:
-                plot = plots.echem_curve(wf, _E, _I, _E_LABEL, _I_LABEL, "Current vs potential (CV)",
+                plot = plots.echem_curve(wf, _E, _I, self._e_label(), _I_LABEL, "Current vs potential (CV)",
                                          by_cycle=True, monotonic=False, height=height,
                                          show_legend=self._has_cycles,
                                          direction_arrows=True)
@@ -749,13 +757,13 @@ class ResultsStep(BaseStep):
                 return self.empty_state("No electrochemistry channel.")
             if self._is_multi():
                 frame = echem.overlay_selected_waveforms(self._named_waveforms(), **self._cycle_kwargs())
-                plot = plots.echem_overlay(frame, _Q, _E, _Q_LABEL, _E_LABEL,
+                plot = plots.echem_overlay(frame, _Q, _E, _Q_LABEL, self._e_label(),
                                            "Voltage profile (potential vs charge) · all runs",
                                            by_cycle=True, monotonic=False, height=height)
                 plot = self._with_ylim(plot, frame, [_E])
                 return self._own_axes(plot, height)
             wf = self._selected_waveform()
-            plot = plots.echem_curve(wf, _Q, _E, _Q_LABEL, _E_LABEL,
+            plot = plots.echem_curve(wf, _Q, _E, _Q_LABEL, self._e_label(),
                                      "Voltage profile (potential vs charge)",
                                      by_cycle=True, monotonic=False, height=height,
                                      show_legend=self._has_cycles)
@@ -773,13 +781,13 @@ class ResultsStep(BaseStep):
                 frame = echem.overlay_selected_waveforms(self._named_waveforms(), **self._cycle_kwargs())
                 if not frame.is_empty() and _I in frame.columns:
                     frame = frame.with_columns((pl.col(_I) / area).alias(_J))
-                plot = plots.echem_overlay(frame, _E, _J, _E_LABEL, _J_LABEL,
+                plot = plots.echem_overlay(frame, _E, _J, self._e_label(), _J_LABEL,
                                            "Current density vs potential · all runs",
                                            by_cycle=True, monotonic=False, height=height)
                 plot = self._with_ylim(plot, frame, [_J], pct=(1, 99))
                 return self._own_axes(plot, height)
             wf = self._selected_waveform()
-            plot = plots.echem_curve(wf, _E, _J, _E_LABEL, _J_LABEL, "Current density vs potential",
+            plot = plots.echem_curve(wf, _E, _J, self._e_label(), _J_LABEL, "Current density vs potential",
                                      by_cycle=True, monotonic=False, height=height,
                                      show_legend=False)
             plot = self._with_ylim(plot, wf, [_J], pct=(1, 99))

@@ -478,15 +478,19 @@ def cycle_trend(
     )
 
 
-def cycle_overlay_runs(frame: pl.DataFrame, q: Quantity, title: str, height: int = PLOT_HEIGHT):
+def cycle_overlay_runs(frame: pl.DataFrame, q: Quantity, title: str, height: int = PLOT_HEIGHT,
+                       ylabel: str | None = None):
     """Multi-run cycle overlay: each cycle of each run on a common origin.
 
     ``frame`` carries ``run``/``run_slot``, ``cycle``, ``t_rel_s`` and ``value``.
     One curve per (run, cycle): run = hue family, cycle = shade within it, so the
-    same cycle compares across runs by colour family.
+    same cycle compares across runs by colour family. ``ylabel`` overrides the
+    quantity's default axis label (used to annotate potential with the reference
+    electrode).
     """
     if frame.is_empty() or "t_rel_s" not in frame.columns or "run_slot" not in frame.columns:
         return empty("No cycle data in selection")
+    ylabel = ylabel or q.axis_label
     curves: list = []
     max_total = 0
     for slot in sorted(int(s) for s in frame["run_slot"].unique().to_list()):
@@ -503,7 +507,7 @@ def cycle_overlay_runs(frame: pl.DataFrame, q: Quantity, title: str, height: int
             x, y = _decimate_xy(sub["t_rel_s"].to_numpy(), sub["value"].to_numpy())
             name = f"{label} · c{c}" if multi else label
             curves.append(
-                hv.Curve((x, y), "Cycle time [s]", q.axis_label, label=name).opts(
+                hv.Curve((x, y), "Cycle time [s]", ylabel, label=name).opts(
                     color=color_for_run_overtone(slot, cslot), line_width=1.6
                 )
             )
@@ -514,7 +518,7 @@ def cycle_overlay_runs(frame: pl.DataFrame, q: Quantity, title: str, height: int
     return hv.Overlay(curves).opts(
         hv.opts.Overlay(
             title=title, height=height, responsive=True, legend_position="right",
-            xlabel="Cycle time [s]", ylabel=q.axis_label, show_grid=True,
+            xlabel="Cycle time [s]", ylabel=ylabel, show_grid=True,
             hooks=[_autohide_toolbar_hook, _legend_mute_hook],
         ),
         hv.opts.Curve(tools=["hover"]),
@@ -554,15 +558,18 @@ def _xy_axis(value_df: pl.DataFrame, group: int, monotonic: bool, max_points: in
     return x, y
 
 
-def cycle_overlay(frame: pl.DataFrame, q: Quantity, title: str, height: int = PLOT_HEIGHT):
+def cycle_overlay(frame: pl.DataFrame, q: Quantity, title: str, height: int = PLOT_HEIGHT,
+                  ylabel: str | None = None):
     """Overlay each selected cycle on a common cycle-time origin.
 
     ``frame`` carries ``cycle``, ``t_rel_s`` (seconds from each cycle's start),
     and ``value``. One curve per cycle, coloured per slot, so cycle shapes can be
-    compared directly.
+    compared directly. ``ylabel`` overrides the quantity's default axis label
+    (used to annotate potential with the reference electrode).
     """
     if frame.is_empty() or "t_rel_s" not in frame.columns or "value" not in frame.columns:
         return empty("No cycle data in selection")
+    ylabel = ylabel or q.axis_label
     cycles = sorted(int(c) for c in frame["cycle"].unique().drop_nulls().to_list())
     total = len(cycles)
     cycles, thinned = _thin_cycles(cycles)
@@ -575,7 +582,7 @@ def cycle_overlay(frame: pl.DataFrame, q: Quantity, title: str, height: int = PL
             continue
         x, y = _decimate_xy(sub["t_rel_s"].to_numpy(), sub["value"].to_numpy())
         curves.append(
-            hv.Curve((x, y), "Cycle time [s]", q.axis_label, label=f"Cycle {c}").opts(
+            hv.Curve((x, y), "Cycle time [s]", ylabel, label=f"Cycle {c}").opts(
                 color=color_for_slot(slot), line_width=1.6
             )
         )
@@ -584,7 +591,7 @@ def cycle_overlay(frame: pl.DataFrame, q: Quantity, title: str, height: int = PL
     return hv.Overlay(curves).opts(
         hv.opts.Overlay(
             title=title, height=height, responsive=True, legend_position="right",
-            xlabel="Cycle time [s]", ylabel=q.axis_label, show_grid=True,
+            xlabel="Cycle time [s]", ylabel=ylabel, show_grid=True,
             hooks=[_autohide_toolbar_hook, _legend_mute_hook],
         ),
         hv.opts.Curve(tools=["hover"]),
@@ -989,7 +996,7 @@ def df_fingerprint(norm_df: pl.DataFrame, d_df: pl.DataFrame, groups: list[int],
 
 def potential_strip(
     wf: pl.DataFrame, t0_us: int, *, window: tuple[float, float] | None = None,
-    height: int = 130,
+    height: int = 130, label: str = "Potential [V]",
 ):
     """Compact full-run E(t) context band shown above the hero on EQCM runs.
 
@@ -1011,12 +1018,12 @@ def potential_strip(
         lo, hi = sorted(float(v) for v in window)
         elements.append(hv.VSpan(lo, hi).opts(color=BASELINE_COLOR, fill_alpha=0.35))
     elements.append(
-        hv.Curve((x, y), X_LABEL, "Potential [V]").opts(color=EVENT_COLOR, line_width=1.1)
+        hv.Curve((x, y), X_LABEL, label).opts(color=EVENT_COLOR, line_width=1.1)
     )
     return hv.Overlay(elements).opts(
         hv.opts.Overlay(
             height=height, responsive=True, show_legend=False, show_grid=True,
-            xlabel=X_LABEL, ylabel="Potential [V]", toolbar=None,
+            xlabel=X_LABEL, ylabel=label, toolbar=None,
             fontsize={"xlabel": "8pt", "ylabel": "8pt", "xticks": "7pt", "yticks": "7pt"},
         ),
     )

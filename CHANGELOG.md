@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Reference-electrode metadata** (Phase 1): a per-run `reference_electrode`
+  experiment parameter that annotates every potential axis ("Potential
+  [V vs Ag|AgCl]") across the Data hero, the E(t) strip, the Results echem plots
+  (CP profile, voltage profile, cycle overlay), the Run info card, and the HTML
+  report. Persists with the run's view state. Notebook-parity ("V vs. Ag|AgCl").
 - Continuous integration (GitHub Actions): pytest matrix on Linux/macOS/Windows
   across Python 3.11–3.13, plus a Ruff lint gate.
 - `LICENSE` (PolyForm Noncommercial 1.0.0), `CITATION.cff`, and this changelog.

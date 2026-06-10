@@ -148,6 +148,9 @@ class ExperimentParams:
       Sauerbrey areal mass and the MPE mass term so the two stay consistent.
     - ``molar_mass``: molar mass M of the deposited species (g/mol).
     - ``valency``: number of electrons z transferred per deposited atom.
+    - ``reference_electrode``: the cell's reference electrode (e.g. ``Ag|AgCl``,
+      ``SCE``). Display-only — it scales nothing — but a potential is meaningless
+      without it, so it annotates every potential axis, the Run info, and exports.
 
     The theoretical mass-per-electron target is ``M / z`` (g/mol) — e.g. zinc
     (65.38 / 2 = 32.69).
@@ -157,6 +160,7 @@ class ExperimentParams:
     sensitivity: float = SAUERBREY_CONSTANT
     molar_mass: float = DEFAULT_MOLAR_MASS_G_PER_MOL
     valency: int = DEFAULT_VALENCY
+    reference_electrode: str = ""
 
     @property
     def target_mpe(self) -> float | None:
@@ -169,6 +173,7 @@ class ExperimentParams:
             "sensitivity": self.sensitivity,
             "molar_mass": self.molar_mass,
             "valency": self.valency,
+            "reference_electrode": self.reference_electrode,
         }
 
     @classmethod
@@ -183,12 +188,26 @@ class ExperimentParams:
                 sensitivity=float(data.get("sensitivity", d.sensitivity)),
                 molar_mass=float(data.get("molar_mass", d.molar_mass)),
                 valency=int(data.get("valency", d.valency)),
+                reference_electrode=str(data.get("reference_electrode", d.reference_electrode) or ""),
             )
         except (TypeError, ValueError):
             return d
 
 
 DEFAULT_PARAMS = ExperimentParams()
+
+
+def potential_axis_label(reference_electrode: str = "") -> str:
+    """Axis/label text for a potential, annotated with the reference electrode.
+
+    ``"Potential [V vs Ag|AgCl]"`` when a reference electrode is set, else the
+    bare ``"Potential [V]"``. One helper so every potential surface (hero axis,
+    E(t) strip, echem plots, Run info, exports) reads the same — a potential
+    without its reference is ambiguous, which the reference notebook is careful
+    to avoid ("V vs. Ag|AgCl").
+    """
+    ref = (reference_electrode or "").strip()
+    return f"Potential [V vs {ref}]" if ref else "Potential [V]"
 
 
 @dataclass(frozen=True)

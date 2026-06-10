@@ -10,7 +10,7 @@ import polars as pl
 
 from .. import plots
 from .. import science  # noqa: F401  (kept for parity; used by subclasses)
-from ..theme import HERO_HEIGHT, axis, quantity
+from ..theme import HERO_HEIGHT, axis, potential_axis_label, quantity
 from ..tokens import FAINT, INK_SOFT
 from ..actions import ViewerActions
 from ..components import empty_state
@@ -493,9 +493,13 @@ class BaseStep:
         if ax.is_time and label_df is not None:
             plot = self.with_phase_labels(plot, label_df, height=height)
         try:
+            # Annotate potential axes with the run's reference electrode.
+            ref = self.controls.params().reference_electrode
+            xlabel = potential_axis_label(ref) if ax.key == "potential" else ax.axis_label
+            ylabel = potential_axis_label(ref) if q.key == "potential" else q.axis_label
             outer = dict(
                 show_legend=show_legend, legend_position="right",
-                xlabel=ax.axis_label, ylabel=q.axis_label,
+                xlabel=xlabel, ylabel=ylabel,
             )
             ylim = self._manual_ylim()
             if ylim is not None:

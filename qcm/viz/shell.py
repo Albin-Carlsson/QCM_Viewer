@@ -133,8 +133,13 @@ class ViewerShell:
 
     # =====================================================  sidebar
     def _run_info_card(self):
-        # Reflect the active run: rebuild when the run set / active run changes.
-        return pn.bind(self._run_info_card_body, self.controls.runset_version)
+        # Reflect the active run: rebuild when the run set / active run changes,
+        # and when the params shown here (electrode area, reference electrode) are
+        # edited so the card never shows a stale value.
+        return pn.bind(
+            self._run_info_card_body, self.controls.runset_version,
+            self.controls.param_area, self.controls.param_reference_electrode,
+        )
 
     def _run_info_card_body(self, *_):
         meta = {}
@@ -158,6 +163,13 @@ class ViewerShell:
             ("Overtones", overtones),
             ("Electrode area", f"{_area:.3f} cm²", f"⌀ {area_to_diameter_mm(_area):.1f} mm"),
         ]
+        # Reference electrode (when set) — a potential is ambiguous without it.
+        try:
+            _ref = self.controls.params().reference_electrode
+        except Exception:
+            _ref = ""
+        if _ref:
+            rows.append(("Reference", _ref))
         if meta.get("sample_rate") is not None:
             rows.append(("Sample rate", f"{meta['sample_rate']} Hz"))
         if meta.get("temperature") is not None:
@@ -575,8 +587,10 @@ class ViewerShell:
             if not _axis(state.x_axis).is_time or state.quantity == "potential":
                 return None
             from . import plots as _plots
+            from .theme import potential_axis_label
             return _plots.potential_strip(
                 self.data.echem_waveform(), self.info.t0_us, window=state.t_range_s,
+                label=potential_axis_label(state.params.reference_electrode),
             )
         except Exception:
             return None

@@ -95,7 +95,7 @@ class ReportStep(BaseStep):
         except Exception:
             method = "—"
         overtones = ", ".join(str(n) for n in sorted(set(info.orders.values()))) or "—"
-        return [
+        rows = [
             ("Run", str(info.run_id)),
             ("Duration", f"{info.span_s:,.2f} s"),
             ("Channels", str(len(info.groups))),
@@ -103,6 +103,14 @@ class ReportStep(BaseStep):
             ("Method", method),
             ("Sweeps", str(info.n_sweeps)),
         ]
+        # A reported potential is ambiguous without its reference electrode.
+        try:
+            ref = self.controls.params().reference_electrode
+        except Exception:
+            ref = ""
+        if ref:
+            rows.append(("Reference electrode", ref))
+        return rows
 
     # --- HTML report builder ----------------------------------------------
     @staticmethod

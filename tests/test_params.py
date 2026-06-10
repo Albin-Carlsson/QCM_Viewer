@@ -6,7 +6,7 @@ import polars as pl
 from qcm.viz import science
 from qcm.viz.controls import ViewerControls
 from qcm.viz.state import RunInfo, ViewState
-from qcm.viz.theme import ExperimentParams
+from qcm.viz.theme import ExperimentParams, potential_axis_label
 
 
 def test_target_mpe_is_molar_mass_over_valency():
@@ -20,6 +20,24 @@ def test_params_dict_roundtrip_and_junk():
     # Partial dict keeps defaults; junk falls back entirely.
     assert ExperimentParams.from_dict({"valency": 3}).valency == 3
     assert ExperimentParams.from_dict("nonsense") == ExperimentParams()
+
+
+def test_reference_electrode_roundtrip_and_label():
+    # Round-trips through to_dict/from_dict; legacy dicts (no key) default to "".
+    p = ExperimentParams(reference_electrode="Ag|AgCl")
+    assert ExperimentParams.from_dict(p.to_dict()).reference_electrode == "Ag|AgCl"
+    assert ExperimentParams.from_dict({"area_cm2": 1.0}).reference_electrode == ""
+    # The shared label helper annotates the potential axis only when set.
+    assert potential_axis_label("Ag|AgCl") == "Potential [V vs Ag|AgCl]"
+    assert potential_axis_label("") == "Potential [V]"
+    assert potential_axis_label("  SCE  ") == "Potential [V vs SCE]"
+
+
+def test_controls_exposes_reference_electrode():
+    saved = {"params": {"reference_electrode": "Ag|AgCl"}}
+    controls = ViewerControls(_info(), saved)
+    assert controls.params().reference_electrode == "Ag|AgCl"
+    assert controls.state().params.reference_electrode == "Ag|AgCl"
 
 
 def _mass_frame():

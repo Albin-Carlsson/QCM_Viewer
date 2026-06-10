@@ -726,6 +726,12 @@ class ViewerControls:
         self.param_valency = pn.widgets.IntInput(
             label="Valency z", value=p.valency, start=1, step=1, sizing_mode="stretch_width",
         )
+        # Reference electrode is display-only metadata (it scales nothing) but a
+        # potential is ambiguous without it, so it annotates every potential axis.
+        self.param_reference_electrode = pn.widgets.TextInput(
+            label="Reference electrode", value=p.reference_electrode,
+            placeholder="e.g. Ag|AgCl, SCE", sizing_mode="stretch_width",
+        )
         # Faraday's-law predicted Δf/n / mass overlay (needs a charge channel).
         self.faraday_show = pn.widgets.Checkbox(
             label="Faraday prediction overlay",
@@ -758,12 +764,13 @@ class ViewerControls:
             sensitivity=self._safe_float(self.param_sensitivity.value, d.sensitivity),
             molar_mass=self._safe_float(self.param_molar_mass.value, d.molar_mass),
             valency=max(1, int(self.param_valency.value or d.valency)),
+            reference_electrode=(self.param_reference_electrode.value or "").strip(),
         )
 
     @property
     def param_inputs(self) -> tuple:
         return (self.param_area, self.param_sensitivity, self.param_molar_mass,
-                self.param_valency, self.faraday_show)
+                self.param_valency, self.param_reference_electrode, self.faraday_show)
 
     def experiment_params_panel(self) -> pn.viewable.Viewable:
         """Editable parameter card with a live Target-MPE (= M/z) readout."""
@@ -786,6 +793,7 @@ class ViewerControls:
             self.param_f0,
             self.param_f0_apply,
             self.param_molar_mass, self.param_valency,
+            self.param_reference_electrode,
             pn.bind(target, *self.param_inputs),
             self.faraday_show,
             title="Experiment parameters",
