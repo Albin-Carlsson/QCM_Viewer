@@ -469,11 +469,16 @@ class ViewerShell:
 
     # =====================================================  topbar
     def _build_topbar(self):
+        # NOT stretch_width: Panel's sizing engine then writes inline
+        # `width:100%; min-width:0` on the shadow host, which the topbar's flex
+        # layout collapses to 0 px — the run title silently vanished (found via
+        # DOM audit). Content-sized pane + flex-grow on the host instead.
         info = pn.pane.HTML(
             "<div class='qcm-runline'>"
             f"<span class='run'>Run {escape(str(self.info.run_id))}</span>"
             "</div>",
-            margin=0, sizing_mode="stretch_width",
+            margin=0,
+            styles={"flex": "1 1 auto", "min-width": "160px"},
         )
         export_btn = pn.widgets.Button(label="Export", icon="download", button_type="primary",
                                        description="Build a shareable report and data export from the current view.",
@@ -508,7 +513,7 @@ class ViewerShell:
             margin=0, css_classes=["qcm-topbar-actions"],
         )
         return pn.Row(
-            info, pn.layout.HSpacer(), actions,
+            info, actions,
             margin=0, sizing_mode="stretch_width", css_classes=["qcm-topbar"],
         )
 
@@ -601,11 +606,9 @@ class ViewerShell:
             self.controls.annotation_version,
         )
         return pn.Card(
-            pn.Row(
-                pn.pane.HTML("<div class='eyebrow'>Show</div>", margin=0),
-                self.controls.analysis_region_select,
-                margin=0, sizing_mode="stretch_width",
-            ),
+            # The select's own "Analysis target" label is the one caption —
+            # the old floating "Show" eyebrow beside it read as misplaced text.
+            self.controls.analysis_region_select,
             table,
             title="Live statistics", collapsible=False, margin=0,
             sizing_mode="stretch_width", css_classes=["qcm-card", "qcm-stats"],

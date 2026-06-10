@@ -145,6 +145,16 @@ html, body {
   padding: var(--qcm-space-2) var(--qcm-space-4);
   position: sticky; top: 0; z-index: 30; box-shadow: var(--qcm-shadow-1);
 }
+/* The title pane is a markup child inside the topbar Row's shadow root; the
+   global stretch_width default writes inline `width:100%; min-width:0` on its
+   host, which the flex row collapses to 0 px (title vanishes). !important
+   beats the engine's non-important inline min-width. */
+:host(.qcm-topbar) .bk-panel-models-markup-HTML {
+  min-width: 240px !important; width: auto !important; flex: 1 1 auto !important;
+}
+/* The actions row must hug its content (the global stretch_width default
+   otherwise grows it over the whole bar with the buttons left-packed). */
+:host(.qcm-topbar) .qcm-topbar-actions { width: auto !important; flex: 0 0 auto !important; }
 .qcm-runline { display: flex; align-items: baseline; min-width: 0; }
 .qcm-runline .run { font-size: var(--qcm-fs-display); font-weight: 800; color: var(--qcm-text);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -206,7 +216,9 @@ html, body {
 .qcm-toolcell .compact-select { width: 100%; min-width: 0; }
 .qcm-toolcell .compact-select label,
 .qcm-toolcell .bk-input-group > label:not(:has(input)) { display: none; margin: 0; }
-.qcm-tooltoggles { display: flex; flex-direction: column; gap: 5px; align-items: flex-start; }
+/* Two tight columns: four toggles must not stack into a tall column that
+   stretches the whole toolbar (user feedback). */
+.qcm-tooltoggles { display: grid; grid-template-columns: auto auto; gap: 3px 14px; align-items: center; }
 .qcm-tooltoggles .bk-input-group { margin: 0; min-height: 20px; line-height: 1.25; }
 .qcm-tooltoggles .bk-input-group label { display: inline-flex; align-items: center; gap: 6px; }
 
@@ -289,7 +301,9 @@ html, body {
 .qcm-stat .caption { color: var(--qcm-muted); font-size: var(--qcm-fs-caption); }
 .qcm-stat.accent { border-color: var(--qcm-accent-border); background: var(--qcm-accent-soft); }
 
-.qcm-statgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--qcm-space-3); }
+/* 140px minimum lets all seven summary tiles (incl. Sauerbrey check) share one
+   row on a normal laptop width instead of orphaning the last tile. */
+.qcm-statgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--qcm-space-3); }
 .qcm-iconstat {
   display: flex; gap: var(--qcm-space-3); align-items: center; border: 1px solid var(--qcm-border);
   border-radius: var(--qcm-radius-card); background: var(--qcm-surface); padding: var(--qcm-space-3);
@@ -511,9 +525,10 @@ button[title*="theme" i], button[aria-label*="theme" i], .theme-toggle, .pn-them
 #   `.bk-btn-default` regardless of button_type — so target `.bk-btn` broadly.
 #   Safe because this is injected only into the specific accent widgets.
 ACCENT_BUTTON_STYLESHEET = """
+:host, .bk-btn-group { background: transparent !important; }
 .bk-btn {
   background: var(--qcm-accent) !important; background-image: none !important;
-  border: 1px solid var(--qcm-accent) !important; color: var(--qcm-text) !important;
+  border: 1px solid var(--qcm-accent) !important; color: #ffffff !important;
   box-shadow: none !important; font-weight: 700;
 }
 .bk-btn:hover {

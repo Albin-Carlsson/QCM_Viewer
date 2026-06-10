@@ -100,6 +100,10 @@ def _legend_mute_hook(plot, _element):
         from bokeh.models import CustomJS, HoverTool
 
         fig = plot.state
+        try:
+            fig.toolbar.logo = None  # toolbar policy — see _autohide_toolbar_hook
+        except Exception:
+            pass
         hover_renderers = []
         seen = set()
         for legend in plot.state.legend:
@@ -519,14 +523,12 @@ def cycle_overlay_runs(frame: pl.DataFrame, q: Quantity, title: str, height: int
 
 
 def _autohide_toolbar_hook(plot, _element):
-    """Keep the Bokeh tool palette (incl. the reset button) always visible.
-
-    This used to set ``toolbar.autohide = True`` for a cleaner resting state,
-    but a hidden-until-hover toolbar made "reset the plot scale" undiscoverable
-    — a hard requirement from user feedback. The hook is kept (as a no-op) so
-    every existing call site stays a single point of policy.
-    """
-    return None
+    """Toolbar policy: always visible (the reset button must be discoverable —
+    user feedback), and no Bokeh logo (it reads as an ad, not a control)."""
+    try:
+        plot.state.toolbar.logo = None
+    except Exception:
+        pass
 
 
 def _xy_axis(value_df: pl.DataFrame, group: int, monotonic: bool, max_points: int = MAX_PLOT_POINTS):

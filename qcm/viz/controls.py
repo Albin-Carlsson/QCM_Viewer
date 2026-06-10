@@ -791,7 +791,7 @@ class ViewerControls:
             self.faraday_show,
             title="Experiment parameters",
             collapsible=True, collapsed=True, margin=0, sizing_mode="stretch_width",
-            css_classes=["experiment-params"],
+            css_classes=["qcm-card", "experiment-params"],
         )
 
     # --- MPE display controls ---------------------------------------------
@@ -884,7 +884,7 @@ class ViewerControls:
             self.mpe_clip, self.mpe_clip_lo, self.mpe_clip_hi,
             self.mpe_target_show,
             title="MPE display", collapsible=True, collapsed=True, margin=0,
-            sizing_mode="stretch_width", css_classes=["mpe-display"],
+            sizing_mode="stretch_width", css_classes=["qcm-card", "mpe-display"],
         )
 
     def signal_cleanup_panel(self) -> pn.viewable.Viewable:
@@ -900,7 +900,7 @@ class ViewerControls:
                          "are never modified.</small>", margin=0),
             self.despike, self.despike_window,
             title="Signal cleanup", collapsible=True, collapsed=True, margin=0,
-            sizing_mode="stretch_width", css_classes=["signal-cleanup"],
+            sizing_mode="stretch_width", css_classes=["qcm-card", "signal-cleanup"],
         )
 
     def state(self) -> ViewState:
@@ -995,6 +995,18 @@ class ViewerControls:
         finally:
             self._syncing_ranges = False
 
+    @staticmethod
+    def _set_range_slider(slider, value: tuple[float, float]) -> None:
+        """Programmatically set a range slider so reactive panels actually fire.
+
+        Bound panels listen to ``value_throttled`` (so live dragging fires one
+        rebuild on release, not one per mouse-move) — but assigning ``.value``
+        from code never emits ``value_throttled``, which left brush selections
+        and typed Start/End edits without a redrawn window on the plot. Update
+        both parameters together.
+        """
+        slider.param.update(value=value, value_throttled=value)
+
     def _sync_slider_from_input(self, kind: RangeKind, edge: RangeEdge, value) -> None:
         if self._syncing_ranges:
             return
@@ -1002,15 +1014,15 @@ class ViewerControls:
         self._syncing_ranges = True
         try:
             if kind == "current":
-                self.t_range.value = (start, end)
+                self._set_range_slider(self.t_range, (start, end))
                 self.t_range_start.value = start
                 self.t_range_end.value = end
             elif kind == "reference":
-                self.baseline_range.value = (start, end)
+                self._set_range_slider(self.baseline_range, (start, end))
                 self.baseline_start.value = start
                 self.baseline_end.value = end
             else:
-                self.mark_range.value = (start, end)
+                self._set_range_slider(self.mark_range, (start, end))
                 self.mark_start.value = start
                 self.mark_end.value = end
         finally:
@@ -1019,31 +1031,31 @@ class ViewerControls:
     def set_current_range_values(self, x0: float, x1: float) -> None:
         """Set the current range from arbitrary values (e.g. a plot brush)."""
         start, end = self._clamp_range(x0, x1)
-        self.t_range.value = (start, end)
+        self._set_range_slider(self.t_range, (start, end))
         self._sync_inputs_from_slider("current", (start, end))
 
     def set_reference_range_values(self, x0: float, x1: float) -> None:
         """Set the zero/reference range from arbitrary values (e.g. a plot brush)."""
         start, end = self._clamp_range(x0, x1)
-        self.baseline_range.value = (start, end)
+        self._set_range_slider(self.baseline_range, (start, end))
         self._sync_inputs_from_slider("reference", (start, end))
 
     def set_mark_range_values(self, x0: float, x1: float) -> None:
         """Set the draft phase-mark range from a plot brush."""
         start, end = self._clamp_range(x0, x1)
-        self.mark_range.value = (start, end)
+        self._set_range_slider(self.mark_range, (start, end))
         self._sync_inputs_from_slider("mark", (start, end))
 
     def set_full_current_range(self, _event=None) -> None:
-        self.t_range.value = (0.0, float(self.info.span_s))
+        self._set_range_slider(self.t_range, (0.0, float(self.info.span_s)))
         self._sync_inputs_from_slider("current", self.t_range.value)
 
     def set_full_reference_range(self, _event=None) -> None:
-        self.baseline_range.value = (0.0, float(self.info.span_s))
+        self._set_range_slider(self.baseline_range, (0.0, float(self.info.span_s)))
         self._sync_inputs_from_slider("reference", self.baseline_range.value)
 
     def set_full_mark_range(self, _event=None) -> None:
-        self.mark_range.value = (0.0, float(self.info.span_s))
+        self._set_range_slider(self.mark_range, (0.0, float(self.info.span_s)))
         self._sync_inputs_from_slider("mark", self.mark_range.value)
 
     def previous_sweep(self, _event=None) -> None:
