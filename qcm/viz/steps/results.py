@@ -676,7 +676,8 @@ class ResultsStep(BaseStep):
             else:
                 plot = plots.echem_curve(wf, _E, _I, _E_LABEL, _I_LABEL, "Current vs potential (CV)",
                                          by_cycle=True, monotonic=False, height=height,
-                                         show_legend=self._has_cycles)
+                                         show_legend=self._has_cycles,
+                                         direction_arrows=True)
             plot = self._with_ylim(plot, wf, [ycol], pct=ypct)
             return self.nearest_hover(self.force_plot_height(plot, height))
         except Exception as exc:  # pragma: no cover

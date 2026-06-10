@@ -30,7 +30,7 @@ from .theme import (
     color_for_run_overtone,
     color_for_slot,
 )
-from .tokens import CYCLE_BAND_COLOR, HEADER_BG
+from .tokens import CYCLE_BAND_COLOR, HEADER_BG, INK_SOFT
 
 X = ELAPSED_COLUMN
 X_LABEL = "Time [s]"
@@ -1012,6 +1012,38 @@ def _thinned_title(title: str, shown: int, total: int) -> str:
     return f"{title} · showing {shown} of {total} cycles"
 
 
+def _direction_arrow_hook(segments: list[tuple[float, float, float, float]]):
+    """Open arrowheads along a sweep path showing travel direction.
+
+    ``segments`` are short ``(x0, y0, x1, y1)`` chords sampled from the curve;
+    the shaft is drawn invisible so only the head marks the direction.
+    """
+    def hook(plot, _element):
+        try:
+            from bokeh.models import Arrow, OpenHead
+
+            for x0, y0, x1, y1 in segments:
+                plot.state.add_layout(Arrow(
+                    x_start=x0, y_start=y0, x_end=x1, y_end=y1,
+                    end=OpenHead(size=9, line_color=INK_SOFT, line_width=1.6),
+                    line_alpha=0.0,
+                ))
+        except Exception:
+            pass
+    return hook
+
+
+def _direction_segments(x: np.ndarray, y: np.ndarray, n_arrows: int = 3, span: int = 4):
+    """Pick ``n_arrows`` short chords along the path for direction arrows."""
+    if len(x) < span + 2:
+        return []
+    idx = np.linspace(0.15, 0.85, n_arrows) * (len(x) - span - 1)
+    return [
+        (float(x[i]), float(y[i]), float(x[i + span]), float(y[i + span]))
+        for i in (int(round(v)) for v in idx)
+    ]
+
+
 def echem_curve(
     wf: pl.DataFrame,
     xcol: str,
@@ -1024,6 +1056,7 @@ def echem_curve(
     monotonic: bool = False,
     height: int = PLOT_HEIGHT,
     show_legend: bool = True,
+    direction_arrows: bool = False,
 ):
     """One line plot of an electrochemistry waveform (one row per sweep).
 
@@ -1032,6 +1065,8 @@ def echem_curve(
     capacity curve. ``monotonic`` selects the time-style min/max envelope
     decimation for axes that increase with time (vs a uniform stride for phase
     portraits whose x reverses, like i–E or E–charge loops).
+    ``direction_arrows`` marks the sweep direction along the first plotted
+    cycle (a CV convention; meaningless on monotonic axes).
     """
     if wf.is_empty() or xcol not in wf.columns or ycol not in wf.columns:
         return empty(f"No {ylabel} data")
@@ -1046,6 +1081,7 @@ def echem_curve(
         return x, y
 
     curves: list = []
+    arrow_xy: tuple[np.ndarray, np.ndarray] | None = None
     if by_cycle and "cycle" in wf.columns:
         cycles = sorted(int(c) for c in wf["cycle"].unique().drop_nulls().to_list())
         total = len(cycles)
@@ -1059,6 +1095,8 @@ def echem_curve(
             x, y = _decimate(sub[xcol].to_numpy(), sub[ycol].to_numpy())
             if not len(x):
                 continue
+            if arrow_xy is None:
+                arrow_xy = (x, y)
             curves.append(
                 hv.Curve((x, y), xlabel, ylabel, label=f"cycle {cyc}").opts(
                     color=color_for_slot(slot), line_width=1.5
@@ -1069,6 +1107,7 @@ def echem_curve(
         if not sub.is_empty():
             x, y = _decimate(sub[xcol].to_numpy(), sub[ycol].to_numpy())
             if len(x):
+                arrow_xy = (x, y)
                 curves.append(
                     hv.Curve((x, y), xlabel, ylabel).opts(color=ACCENT, line_width=1.7)
                 )
@@ -1078,6 +1117,10 @@ def echem_curve(
     hooks = [_legend_mute_hook]
     if monotonic:
         hooks.insert(0, _vline_hover_hook)
+    if direction_arrows and not monotonic and arrow_xy is not None:
+        segments = _direction_segments(*arrow_xy)
+        if segments:
+            hooks.append(_direction_arrow_hook(segments))
     return hv.Overlay(curves).opts(
         hv.opts.Overlay(
             title=title, height=height, responsive=True, legend_position="right",

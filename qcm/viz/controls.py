@@ -817,13 +817,37 @@ class ViewerControls:
         Orders are auto-inferred from the resonance frequencies; this lets you
         override them for channels that aren't true odd-multiple overtones (which
         is what makes Δf/n normalization a no-op when every channel reads n=1).
+
+        Per-channel number boxes are the primary editor; they rewrite the
+        ``g0:n=1, …`` text (the persisted source of truth, kept visible for bulk
+        paste). The sync is one-way — hand-editing the text does not move the
+        boxes — which is fine for an advanced escape hatch.
         """
+        def _apply(group: int):
+            def cb(event):
+                cur = self.orders()
+                cur[group] = max(1, int(event.new or 1))
+                self.orders_text.value = ", ".join(
+                    f"g{g}:n={n}" for g, n in sorted(cur.items())
+                )
+            return cb
+
+        boxes = []
+        for g in self.info.groups:
+            w = pn.widgets.IntInput(
+                label=f"Channel g{g} → n", value=int(self.info.orders.get(g, 1)),
+                start=1, step=2, sizing_mode="stretch_width",
+            )
+            w.param.watch(_apply(g), "value")
+            boxes.append(w)
+
         def readout(*_):
             return pn.pane.Markdown(
                 " · ".join(f"**g{g} → n={n}**" for g, n in sorted(self.orders().items())),
                 margin=0, sizing_mode="stretch_width",
             )
         return pn.Card(
+            *boxes,
             self.orders_text,
             pn.bind(readout, self.orders_text),
             title="Overtone orders (advanced)",
