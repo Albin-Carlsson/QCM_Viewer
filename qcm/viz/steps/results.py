@@ -188,6 +188,19 @@ class ResultsStep(BaseStep):
         except Exception as exc:  # pragma: no cover
             return pn.pane.Alert(f"Summary failed: {exc}", alert_type="danger")
 
+    def _comparison_frame(self) -> pl.DataFrame:
+        """Per-run × per-channel summary frame shared by the table and its CSV export."""
+        rs = self._runset()
+        if rs is None or not rs.is_multi:
+            return pl.DataFrame()
+        summary = rs.overlay_region_summary(self.controls.state())
+        if summary.is_empty():
+            return summary
+        if "run_slot" in summary.columns:
+            summary = summary.drop("run_slot")
+        order = ["run", "group", "n", "df_n", "dD", "mass", "Q", "dD_per_df"]
+        return summary.select([c for c in order if c in summary.columns])
+
     def per_channel_comparison_table(self):
         """Per-run × per-channel headline summary over the analysis range.
 
@@ -195,16 +208,10 @@ class ResultsStep(BaseStep):
         comparison alongside the active-run KPI tiles.
         """
         try:
-            rs = self._runset()
-            if rs is None or not rs.is_multi:
-                return pn.Spacer(height=0)
-            summary = rs.overlay_region_summary(self.controls.state())
+            summary = self._comparison_frame()
             if summary.is_empty():
                 return self.empty_state("No data in the current analysis range.")
-            if "run_slot" in summary.columns:
-                summary = summary.drop("run_slot")
             order = ["run", "group", "n", "df_n", "dD", "mass", "Q", "dD_per_df"]
-            summary = summary.select([c for c in order if c in summary.columns])
             return self._summary_tabulator(summary, order)
         except Exception as exc:  # pragma: no cover
             return pn.pane.Alert(f"Comparison table failed: {exc}", alert_type="danger")
@@ -504,23 +511,30 @@ class ResultsStep(BaseStep):
         except Exception as exc:  # pragma: no cover
             return pn.pane.Alert(f"Cycle overlay failed: {exc}", alert_type="danger")
 
+    def _per_cycle_frame(self) -> pl.DataFrame:
+        """Per-cycle stats frame shared by the table and its CSV export."""
+        if not self.data.has_echem():
+            return pl.DataFrame()
+        if self._is_multi():
+            stats = self._multi_augmented(filtered=True)
+            if stats.is_empty():
+                return stats
+            # Lead with the run label; drop the colour-slot helper column.
+            if "run_slot" in stats.columns:
+                stats = stats.drop("run_slot")
+            return stats.select(["run"] + [c for c in stats.columns if c != "run"])
+        stats = echem.cycle_stats(self._selected_waveform(), self._technique())
+        if stats.is_empty():
+            return stats
+        return self._augment_with_mpe(stats)
+
     def per_cycle_table(self):
         try:
             if not self.data.has_echem():
                 return self.empty_state("This run has no electrochemistry channel, so per-cycle results are unavailable.")
-            if self._is_multi():
-                stats = self._multi_augmented(filtered=True)
-                if stats.is_empty():
-                    return self.empty_state("No cycles in the current selection.")
-                # Lead with the run label; drop the colour-slot helper column.
-                if "run_slot" in stats.columns:
-                    stats = stats.drop("run_slot")
-                stats = stats.select(["run"] + [c for c in stats.columns if c != "run"])
-                return self._render_cycle_table(stats)
-            stats = echem.cycle_stats(self._selected_waveform(), self._technique())
+            stats = self._per_cycle_frame()
             if stats.is_empty():
                 return self.empty_state("No cycles in the current selection.")
-            stats = self._augment_with_mpe(stats)
             return self._render_cycle_table(stats)
         except Exception as exc:  # pragma: no cover
             return pn.pane.Alert(f"Per-cycle table failed: {exc}", alert_type="danger")
@@ -717,8 +731,11 @@ class ResultsStep(BaseStep):
             # QCM-only run: headline cards + one big mass-vs-time plot.
             children = [self.panel(self.summary_cards, *sig, rv, title="Summary (current analysis range)")]
             if self._is_multi():
-                children.append(self.panel(self.per_channel_comparison_table, *sig, rv,
-                                           title="Per-channel comparison (all runs)"))
+                children.append(self.panel(
+                    self.per_channel_comparison_table, *sig, rv,
+                    title="Per-channel comparison (all runs)",
+                    controls=pn.Row(self.csv_download(self._comparison_frame, "per_channel_comparison.csv"),
+                                    margin=0), controls_position="bottom"))
             children.append(self.panel(lambda: self.mass_vs_potential(height=RESULTS_PLOT_HEIGHT),
                                        *sig, self.controls.plot_reset_version, title="Mass vs time"))
             return pn.Column(*children, margin=0, sizing_mode="stretch_width", css_classes=["qcm-page-results"])
@@ -746,8 +763,11 @@ class ResultsStep(BaseStep):
             self.panel(self.summary_cards, *sig, rv, title="Summary (current analysis range)"),
         ]
         if self._is_multi():
-            rows.append(self.panel(self.per_channel_comparison_table, *sig, rv,
-                                   title="Per-channel comparison (all runs)"))
+            rows.append(self.panel(
+                self.per_channel_comparison_table, *sig, rv,
+                title="Per-channel comparison (all runs)",
+                controls=pn.Row(self.csv_download(self._comparison_frame, "per_channel_comparison.csv"),
+                                margin=0), controls_position="bottom"))
         rows += [
             pn.Row(
                 self.panel(lambda: self.primary_echem_plot(), *sig, *cyc, rv, self.controls.plot_reset_version,
@@ -761,7 +781,9 @@ class ResultsStep(BaseStep):
                     self.controls.plot_reset_version),
             self.panel(lambda: self.cycle_overlay_plot(), *sig, *cyc, rv, self.controls.plot_reset_version,
                        title="Cycle overlay", controls=pn.Row(self.cycle_zero, margin=0)),
-            self.panel(self.per_cycle_table, *sig, *cyc, rv, title="Per-cycle summary"),
+            self.panel(self.per_cycle_table, *sig, *cyc, rv, title="Per-cycle summary",
+                       controls=pn.Row(self.csv_download(self._per_cycle_frame, "per_cycle_summary.csv"),
+                                       margin=0), controls_position="bottom"),
             # Per-cycle MPE + Coulombic efficiency — shown for CP only.
             pn.bind(self._trend_plot_row, self.technique_select, *sig, *cyc, rv,
                     self.controls.plot_reset_version),

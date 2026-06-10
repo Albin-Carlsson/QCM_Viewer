@@ -282,6 +282,31 @@ class BaseStep:
             disabled=True,
         )
 
+    def csv_download(self, frame_fn, filename: str, label: str = "Download CSV"):
+        """A download button for a results table.
+
+        ``frame_fn`` is called at click time so the exported CSV always matches
+        the current selection (cycles, range, params) rather than a stale render.
+        """
+        def _file():
+            import io
+
+            buf = io.BytesIO()
+            try:
+                df = frame_fn()
+                if df is not None and not df.is_empty():
+                    df.write_csv(buf)
+            except Exception:
+                pass
+            buf.seek(0)
+            return buf
+
+        return pn.widgets.FileDownload(
+            callback=_file, filename=filename, label=label,
+            button_type="default", width=150, height=30,
+            css_classes=["qcm-table-download"],
+        )
+
     @staticmethod
     def _fmt(value, digits: int = 2, suffix: str = "") -> str:
         if value is None:
