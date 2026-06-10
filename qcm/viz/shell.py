@@ -114,6 +114,8 @@ class ViewerShell:
         self._page_report = self._build_report_page()
         self._pages = {"data": self._page_data, "results": self._page_results, "report": self._page_report}
         self._sync_pages(self.mode.value)
+        # Persist the workspace (paths + labels + active) on every set change.
+        self.runset.save_session()
 
     def _sync_pages(self, index: int) -> None:
         active = nav.mode_id(index)

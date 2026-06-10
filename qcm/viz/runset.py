@@ -15,6 +15,8 @@ is meaningful across runs that were recorded at different wall-clock times.
 """
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
 
 import polars as pl
@@ -26,6 +28,16 @@ from .data import QCMViewData
 from .state import RunInfo, ViewState
 
 _US = 1_000_000
+
+# Where the last workspace (run paths + labels + active run) is remembered, so
+# a comparison session survives an app restart. Override with QCM_SESSION_FILE
+# (tests point it at a tmp dir so they never touch the user's real session).
+_DEFAULT_SESSION_FILE = Path.home() / ".qcm_viewer" / "last_session.json"
+
+
+def session_file() -> Path:
+    override = os.environ.get("QCM_SESSION_FILE")
+    return Path(override) if override else _DEFAULT_SESSION_FILE
 
 
 def read_run_info(run: QCMRun) -> RunInfo:
@@ -125,6 +137,27 @@ class RunSet:
     def add_path(self, path: str | Path) -> int:
         return self.add_run(load_run(path))
 
+    # --- session persistence ------------------------------------------------
+    def to_session(self) -> dict:
+        return {
+            "version": 1,
+            "active": self.active_index,
+            "runs": [
+                {"path": str(d.run.path), "label": self._labels[i]}
+                for i, d in enumerate(self.runs)
+            ],
+        }
+
+    def save_session(self, path: str | Path | None = None) -> Path | None:
+        """Remember this workspace; best-effort (never raises into the UI)."""
+        target = Path(path) if path else session_file()
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(json.dumps(self.to_session(), indent=2))
+            return target
+        except OSError:
+            return None
+
     def overlay_value_df(
         self,
         state: ViewState,
@@ -175,6 +208,62 @@ class RunSet:
         if not frames:
             return pl.DataFrame()
         return pl.concat(frames, how="diagonal_relaxed")
+
+
+def peek_session(path: str | Path | None = None) -> list[dict]:
+    """The still-loadable run entries of the remembered session (no run I/O).
+
+    Entries whose run directory has vanished (e.g. temp-dir imports) are
+    dropped. Empty list = nothing to resume.
+    """
+    target = Path(path) if path else session_file()
+    try:
+        payload = json.loads(target.read_text())
+    except (OSError, ValueError):
+        return []
+    out = []
+    for entry in payload.get("runs", []):
+        p = Path(str(entry.get("path", "")))
+        if (p / "manifest.json").exists():
+            out.append({"path": str(p), "label": str(entry.get("label", p.name))})
+    return out
+
+
+def load_session(path: str | Path | None = None) -> "RunSet | None":
+    """Rebuild the remembered workspace, or ``None`` when nothing loads."""
+    target = Path(path) if path else session_file()
+    entries = peek_session(target)
+    if not entries:
+        return None
+    try:
+        payload = json.loads(target.read_text())
+        active_path = None
+        runs_meta = payload.get("runs", [])
+        idx = int(payload.get("active", 0))
+        if 0 <= idx < len(runs_meta):
+            active_path = str(runs_meta[idx].get("path"))
+    except (OSError, ValueError):
+        active_path = None
+    runs = []
+    labels = []
+    for entry in entries:
+        try:
+            runs.append(load_run(entry["path"]))
+            labels.append(entry["label"])
+        except Exception:  # noqa: BLE001 — a broken run dir must not kill resume
+            continue
+    if not runs:
+        return None
+    active = 0
+    if active_path is not None:
+        for i, d in enumerate(runs):
+            if str(d.run.path) == active_path:
+                active = i
+                break
+    rs = RunSet(runs, active=active)
+    for i, label in enumerate(labels):
+        rs.set_label(i, label)
+    return rs
 
 
 class ActiveRunView:

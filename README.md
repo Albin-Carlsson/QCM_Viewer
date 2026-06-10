@@ -9,12 +9,26 @@ with cycle-aware electrochemistry views — all offline, on your own files.
 
 ---
 
-## Quick start (the easy way)
+## Quick start (no command line)
+
+**macOS:** double-click **`Start QCM Viewer.command`** in this folder. The first
+run installs everything it needs (a minute or two); after that it starts in
+seconds and opens the viewer in your browser. If macOS warns about an
+unidentified developer, right-click the file and choose *Open* the first time.
+
+The viewer opens on a **file picker** — choose a measurement folder or
+instrument file and click *Open*. If you analysed something last time, a
+**Resume last session** button restores that workspace (runs, labels, active
+run) with one click.
+
+## Quick start (command line)
 
 ```bash
-python -m pip install -e .          # one-time install into a Python ≥3.11 env
-qcm view path/to/measurement.csv    # imports if needed, opens the browser
+pip install uv                      # or: curl -LsSf https://astral.sh/uv/install.sh | sh
+uv run qcm view measurement.csv     # imports if needed, opens the browser
 ```
+
+(With a classic environment: `python -m pip install -e .` then `qcm view …`.)
 
 `qcm view` accepts:
 
@@ -24,10 +38,11 @@ qcm view path/to/measurement.csv    # imports if needed, opens the browser
 
 ```bash
 qcm view runA.csv runB.csv          # overlay two runs
+qcm view                            # no file: picker page + resume-last-session
 ```
 
-If you start the server with no file, the page shows a **file picker** — choose a
-folder or instrument file and click *Open*. No command-line knowledge needed.
+A sibling `*_PS.csv` potentiostat export next to the QCM file is paired
+automatically.
 
 ### Pair a potentiostat (EQCM)
 

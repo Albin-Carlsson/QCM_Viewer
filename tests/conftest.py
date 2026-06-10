@@ -1,9 +1,16 @@
 """Shared test fixtures for the QCM viewer."""
 from __future__ import annotations
 
+import os
+import tempfile
 from pathlib import Path
 
 import pytest
+
+# Keep test-built viewers from overwriting the user's real remembered session.
+os.environ.setdefault(
+    "QCM_SESSION_FILE", str(Path(tempfile.mkdtemp(prefix="qcm_test_")) / "session.json")
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _DEMO_RUN = _REPO_ROOT / "view-run"

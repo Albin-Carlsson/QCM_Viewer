@@ -55,9 +55,15 @@ class QCMViewer:
     exactly as before.
     """
 
-    def __init__(self, run_path: str | Path | list[str | Path]):
-        paths = [run_path] if isinstance(run_path, (str, Path)) else list(run_path)
-        self.runset = RunSet.from_paths(paths)
+    def __init__(self, run_path: str | Path | list[str | Path] | None = None, *,
+                 runset: RunSet | None = None):
+        if runset is not None:
+            self.runset = runset
+        else:
+            paths = [run_path] if isinstance(run_path, (str, Path)) else list(run_path or [])
+            self.runset = RunSet.from_paths(paths)
+        # Remember the workspace so the next bare launch can offer to resume it.
+        self.runset.save_session()
         # Single-run views hold proxies that follow the active-run selector; the
         # shared controls are sized once from the launch run (the selection is
         # shared across runs, so they are not rebuilt when the active run flips).
@@ -91,6 +97,7 @@ def _landing():
     import tempfile
 
     from qcm.profiles import import_run, resolve_import_target
+    from .runset import load_session, peek_session
 
     _ensure_app_css()
     root = pn.Column(sizing_mode="stretch_width", css_classes=["qcm-app"])
@@ -135,13 +142,35 @@ def _landing():
             _set("danger", f"Failed to load: {exc}")
 
     open_btn.on_click(_open)
+
+    # Offer to resume the previous workspace when its run dirs still exist.
+    resume_row: list = []
+    remembered = peek_session()
+    if remembered:
+        names = ", ".join(e["label"] for e in remembered[:4])
+        if len(remembered) > 4:
+            names += ", …"
+        resume_btn = pn.widgets.Button(
+            name=f"Resume last session ({names})", button_type="default", icon="history",
+        )
+
+        def _resume(_event=None):
+            rs = load_session()
+            if rs is None:
+                _set("warning", "The previous session could not be loaded.")
+                return
+            root.objects = [QCMViewer(runset=rs).view()]
+
+        resume_btn.on_click(_resume)
+        resume_row = [pn.Row(resume_btn, margin=(0, 0, 12, 0))]
+
     root.objects = [pn.Column(
         pn.pane.HTML(
             "<div style='max-width:760px;margin:48px auto 0'>"
             "<h1 style='margin:0 0 4px'>QCM-D Viewer</h1>"
             "<p style='color:#64748b;margin:0 0 20px'>Open a measurement to begin.</p></div>"
         ),
-        pn.Column(browser, pn.Row(open_btn, margin=0), status,
+        pn.Column(*resume_row, browser, pn.Row(open_btn, margin=0), status,
                   css_classes=["qcm-card"], margin=(0, 0, 0, 0),
                   styles={"max-width": "760px", "margin": "0 auto"}),
         sizing_mode="stretch_width",

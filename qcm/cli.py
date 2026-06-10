@@ -200,15 +200,17 @@ def export_data(run_path: Path, output: Path, columns: list[str] = typer.Option(
 
 def _serve_runs(run_dirs: list[Path], port: int, show: bool) -> None:
     cmd = [sys.executable, "-m", "panel", "serve", str(Path(__file__).parent / "panel_app.py"),
-           "--port", str(port), "--args", *[str(p) for p in run_dirs]]
+           "--port", str(port)]
     if show:
-        cmd.insert(cmd.index("--args"), "--show")
+        cmd.append("--show")
+    if run_dirs:
+        cmd += ["--args", *[str(p) for p in run_dirs]]
     raise typer.Exit(subprocess.call(cmd))
 
 
 @app.command()
 def view(
-    source: list[Path] = typer.Argument(..., help="Run folders, experiment folders, or instrument files."),
+    source: list[Path] = typer.Argument(None, help="Run folders, experiment folders, or instrument files."),
     cv_scan_rate: float | None = typer.Option(
         None, "--cv-scan-rate",
         help="CV scan rate in V/s. Overrides the value parsed from the filename for cyclic-voltammetry runs.",
@@ -222,7 +224,12 @@ def view(
     already-ingested run. A sibling potentiostat ``*_PS.csv`` is paired
     automatically, raw files are imported to a temporary run, and run folders
     open directly. Pass several sources to overlay them; the browser opens.
+    With no source at all, a picker page opens (offering to resume the last
+    session when one is remembered).
     """
+    if not source:
+        _serve_runs([], port, show)
+        return
     run_dirs: list[Path] = []
     for i, src in enumerate(source):
         qcm_src, ps_src = resolve_import_target(src)
