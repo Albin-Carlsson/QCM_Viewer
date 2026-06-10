@@ -115,9 +115,12 @@ def attach_cv_echem(
     rate: within each scan the time advances by ``dt = |ΔV| / scan_rate`` per
     sample (a constant-rate sweep), and scans are stitched sequentially from
     ``t=0``. ``potential``/``current`` are linearly interpolated onto each QCM
-    timestamp and ``cycle`` is step-assigned from the real scan boundaries; QCM
-    samples beyond the CV's reconstructed span get no echem (null) rather than a
-    held value. ``scan_rate`` defaults to 0.025 V/s when unknown.
+    timestamp, ``charge`` is the trapezoidal integral of current over the
+    reconstructed time (so mass-vs-charge and the dynamic MPE work for CV runs
+    exactly as for CP), and ``cycle`` is step-assigned from the real scan
+    boundaries; QCM samples beyond the CV's reconstructed span get no echem
+    (null) rather than a held value. ``scan_rate`` defaults to 0.025 V/s when
+    unknown.
     """
     if qcm_frame.is_empty() or cv.is_empty():
         return qcm_frame
@@ -133,6 +136,9 @@ def attach_cv_echem(
     cur = cv["current"].to_numpy()
     cyc = cv["cycle"].to_numpy()
     t_end = float(t_cv[-1]) if len(t_cv) else 0.0
+    # Charge by trapezoidal integration of I over the reconstructed time base.
+    chg = np.concatenate([[0.0], np.cumsum(0.5 * (cur[1:] + cur[:-1]) * np.diff(t_cv))]) \
+        if len(t_cv) > 1 else np.zeros_like(cur)
 
     ts = qcm_frame.select("timestamp").unique().sort("timestamp")["timestamp"]
     ts_us = ts.to_numpy()
@@ -149,10 +155,12 @@ def attach_cv_echem(
         "timestamp": ts,
         "potential": _masked(np.interp(q, t_cv, pot)),
         "current": _masked(np.interp(q, t_cv, cur)),
+        "charge": _masked(np.interp(q, t_cv, chg)),
         "cycle": _masked(cyc[idx].astype(float)),
     }).with_columns(
         pl.col("potential").fill_nan(None),
         pl.col("current").fill_nan(None),
+        pl.col("charge").fill_nan(None),
         pl.col("cycle").fill_nan(None).cast(pl.Int64, strict=False),
     )
     return qcm_frame.join(echem_df, on="timestamp", how="left")

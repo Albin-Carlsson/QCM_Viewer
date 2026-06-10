@@ -185,3 +185,33 @@ def test_scan_rate_from_filename():
     assert scan_rate_from_filename("CV_-1050mV_-200mV_25mVs.csv") == 0.025
     assert scan_rate_from_filename("foo_100mVs_PS.csv") == 0.1
     assert scan_rate_from_filename("no_rate_here.csv") is None
+
+
+def test_attach_cv_echem_integrates_charge():
+    """CV exports carry no charge; it must be integrated from I over the
+    reconstructed time so mass-vs-charge and MPE work for CV runs."""
+    import numpy as np
+    import polars as pl
+    from qcm.profiles.pstrace_cv_csv import attach_cv_echem
+
+    # one triangular scan, constant |dV| steps, constant current 1 mA
+    n = 101
+    pot = np.concatenate([np.linspace(-1.0, -0.5, n // 2 + 1),
+                          np.linspace(-0.5, -1.0, n // 2)])
+    cv = pl.DataFrame({
+        "cycle": np.ones(n, dtype=np.int64),
+        "potential": pot,
+        "current": np.full(n, 1e-3),
+    })
+    qcm = pl.DataFrame({
+        "timestamp": (np.linspace(0, 40, 200) * 1_000_000).astype(np.int64),
+        "group": np.zeros(200, dtype=np.int64),
+        "fit_center": np.full(200, 5e6),
+    })
+    out = attach_cv_echem(qcm, cv, scan_rate=0.025)
+    assert "charge" in out.columns
+    q = out.drop_nulls("charge").sort("timestamp")["charge"].to_numpy()
+    # constant 1 mA for 40 s sweep -> Q grows linearly to ~0.04 C
+    assert q[0] >= 0.0
+    assert abs(q[-1] - 1e-3 * 40.0) < 2e-3
+    assert np.all(np.diff(q) >= -1e-12)
