@@ -82,6 +82,13 @@ MPE_SAVGOL_POLYORDER = 2
 # bubbles, brief fit glitches). Threshold is in robust sigmas (MAD-scaled).
 DESPIKE_WINDOW_DEFAULT = 7
 DESPIKE_THRESHOLD_SIGMA = 5.0
+# Median-absolute-deviation → standard deviation for a normal distribution
+# (1/Φ⁻¹(3/4)); turns a rolling MAD into a robust sigma estimate.
+MAD_TO_SIGMA = 1.4826
+# Widest PS↔QCM misalignment the cross-correlation searches for. Real import
+# offsets are a few seconds; beyond ±30 s the correlation peak is more likely
+# a cycle-period alias than a true offset.
+ALIGNMENT_MAX_LAG_S = 30.0
 # Sauerbrey validity rules of thumb. The film counts as rigid when
 # ΔD/(−Δf/n) ≲ 4×10⁻⁷ Hz⁻¹ (Reviakine et al., Anal. Chem. 2011) — 0.4 in the
 # viewer's ×10⁻⁶-per-Hz units — and the overtones should tell the same story:

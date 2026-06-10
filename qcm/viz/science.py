@@ -14,6 +14,7 @@ from __future__ import annotations
 import polars as pl
 
 from .theme import (
+    ALIGNMENT_MAX_LAG_S,
     CHARGE_EPS_C,
     DEFAULT_PARAMS,
     DESPIKE_THRESHOLD_SIGMA,
@@ -21,6 +22,7 @@ from .theme import (
     DISSIPATION_SCALE,
     FARADAY_CONSTANT,
     FREQ_EPS_HZ,
+    MAD_TO_SIGMA,
     MPE_SAVGOL_POLYORDER,
     MPE_SMOOTH_WINDOW_DEFAULT,
     NG_PER_CM2_TO_G,
@@ -250,7 +252,7 @@ def despike(
             .rolling_median(window_size=w, min_samples=1, center=True)
             .to_numpy()
         )
-        sigma = 1.4826 * mad
+        sigma = MAD_TO_SIGMA * mad
         # A locally-constant window has sigma 0; soften with the trace-typical
         # sigma, and where the whole trace is constant treat any deviation from
         # the local median as a spike.
@@ -270,7 +272,7 @@ def despike(
     return out.group_by("group", maintain_order=True).map_groups(_despike_group)
 
 
-def alignment_lag(df: pl.DataFrame, *, max_lag_s: float = 30.0) -> dict | None:
+def alignment_lag(df: pl.DataFrame, *, max_lag_s: float = ALIGNMENT_MAX_LAG_S) -> dict | None:
     """Estimate the PS↔QCM time offset from Faraday's law.
 
     ``df`` carries ``[t_s, mass, current]`` on the QCM time base (the PS stream
