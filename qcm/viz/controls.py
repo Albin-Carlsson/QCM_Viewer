@@ -30,7 +30,6 @@ from .theme import (
     QUANTITIES,
     ExperimentParams,
     area_to_diameter_mm,
-    quantity,
     sensitivity_from_f0,
 )
 
@@ -1003,9 +1002,15 @@ class ViewerControls:
         rebuild on release, not one per mouse-move) — but assigning ``.value``
         from code never emits ``value_throttled``, which left brush selections
         and typed Start/End edits without a redrawn window on the plot. Update
-        both parameters together.
+        both parameters together. ``value_throttled`` is a *constant* parameter
+        (only the widget itself may set it), so the assignment must run inside
+        ``edit_constant`` — without it every brush / typed edit raises
+        ``TypeError`` server-side and the range silently never moves.
         """
-        slider.param.update(value=value, value_throttled=value)
+        from param.parameterized import edit_constant
+
+        with edit_constant(slider):
+            slider.param.update(value=value, value_throttled=value)
 
     def _sync_slider_from_input(self, kind: RangeKind, edge: RangeEdge, value) -> None:
         if self._syncing_ranges:

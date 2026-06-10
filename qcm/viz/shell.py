@@ -34,7 +34,6 @@ from .components import (
     phase_list,
     phase_row,
     run_info_table,
-    section_title,
 )
 from .controls import ViewerControls
 from .data import QCMViewData
@@ -157,7 +156,7 @@ class ViewerShell:
             ("Duration", f"{self.info.span_s:,.2f} s"),
             ("Channels", str(len(self.info.groups))),
             ("Overtones", overtones),
-            ("Electrode area", f"{_area:.3f} cm² (⌀ {area_to_diameter_mm(_area):.1f} mm)"),
+            ("Electrode area", f"{_area:.3f} cm²", f"⌀ {area_to_diameter_mm(_area):.1f} mm"),
         ]
         if meta.get("sample_rate") is not None:
             rows.append(("Sample rate", f"{meta['sample_rate']} Hz"))
@@ -480,13 +479,23 @@ class ViewerShell:
             margin=0,
             styles={"flex": "1 1 auto", "min-width": "160px"},
         )
+        # The topbar hugs the right screen edge and Panel's default tooltip
+        # position is "right", which pushes these buttons' explanations off
+        # screen — pass explicit bottom-positioned Tooltip models instead.
+        from bokeh.models import Tooltip
+
+        def _below(text: str) -> Tooltip:
+            return Tooltip(content=text, position="bottom")
+
         export_btn = pn.widgets.Button(label="Export", icon="download", button_type="primary",
-                                       description="Build a shareable report and data export from the current view.",
+                                       description=_below("Build a shareable report and data "
+                                                          "export from the current view."),
                                        stylesheets=[ACCENT_BUTTON_STYLESHEET],
                                        sizing_mode="fixed")
         export_btn.on_click(self._go(nav.mode_index("report")))
         inspect = pn.widgets.Button(label="Inspect raw sweeps", icon="microscope", button_type="default",
-                                    description="Open the raw resonance sweeps and I/Q traces for QC.",
+                                    description=_below("Open the raw resonance sweeps and "
+                                                       "I/Q traces for QC."),
                                     sizing_mode="fixed")
         inspect.on_click(self._open_drawer)
 
@@ -497,7 +506,7 @@ class ViewerShell:
         def _sync_inspect(*_):
             has_raw = bool(getattr(self.data, "has_raw", lambda: True)())
             inspect.disabled = not has_raw
-            inspect.description = (
+            inspect.description = _below(
                 "Open the raw resonance sweeps and I/Q traces for QC."
                 if has_raw else
                 "This run was imported from fitted Fr/D values — it has no raw "
@@ -508,6 +517,10 @@ class ViewerShell:
         # Hug content so the group stays tight on the right (the shared save button
         # otherwise inherits stretch_width from its definition).
         self.controls.save_state_button.sizing_mode = "fixed"
+        self.controls.save_state_button.description = _below(
+            "Save the current selections, axes, and ranges to this run "
+            "so they're restored next time you open it."
+        )
         actions = pn.Row(
             self.controls.save_state_button, inspect, export_btn,
             margin=0, css_classes=["qcm-topbar-actions"],

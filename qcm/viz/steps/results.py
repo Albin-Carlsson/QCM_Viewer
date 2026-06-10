@@ -35,6 +35,7 @@ from ..theme import (
     quantity,
 )
 from ._base import BaseStep
+from ..errors import surface_error
 
 _E = "potential"
 _I = "current"
@@ -207,7 +208,7 @@ class ResultsStep(BaseStep):
                 ]
             return stat_grid(cells)
         except Exception as exc:  # pragma: no cover
-            return pn.pane.Alert(f"Summary failed: {exc}", alert_type="danger")
+            return surface_error("Summary", exc)
 
     def _comparison_frame(self) -> pl.DataFrame:
         """Per-run × per-channel summary frame shared by the table and its CSV export."""
@@ -235,7 +236,7 @@ class ResultsStep(BaseStep):
             order = ["run", "group", "n", "df_n", "dD", "mass", "Q", "dD_per_df"]
             return self._summary_tabulator(summary, order)
         except Exception as exc:  # pragma: no cover
-            return pn.pane.Alert(f"Comparison table failed: {exc}", alert_type="danger")
+            return surface_error("Comparison table", exc)
 
     # --- technique metadata ------------------------------------------------
     def metadata_card(self):
@@ -270,7 +271,7 @@ class ResultsStep(BaseStep):
                 css_classes=["summary-table", "echem-metadata-table"],
             )
         except Exception as exc:  # pragma: no cover
-            return pn.pane.Alert(f"Metadata failed: {exc}", alert_type="danger")
+            return surface_error("Metadata", exc)
 
     # --- cycle controls ----------------------------------------------------
     def cycle_controls(self):
@@ -428,6 +429,21 @@ class ResultsStep(BaseStep):
         except Exception:
             return plot
 
+    def _own_axes(self, plot, height: int):
+        """Finish a Results plot: hover + height + *independent* axis ranges.
+
+        Panel links every figure in the document that shares a dimension tag
+        and holds them to the union of their ranges (``linked_axes``), so a
+        plot rebuilt for a single cycle inherited the full-run time/charge
+        range instead of autoscaling to the filtered data. Opting these
+        figures out makes every cycle (re)selection reset each plot's scale
+        to its own data.
+        """
+        return pn.pane.HoloViews(
+            self.nearest_hover(self.force_plot_height(plot, height)),
+            linked_axes=False, margin=0, sizing_mode="stretch_width",
+        )
+
     def mpe_trend_plot(self, height: int = PLOT_HEIGHT):
         """MPE (plating + stripping) vs cycle number across runs, with M/z target."""
         try:
@@ -443,9 +459,9 @@ class ResultsStep(BaseStep):
                         ("MPE_stripping_g_per_mol", "stripping", "triangle")],
                 ylabel="MPE (g/mol)", title="MPE per cycle", target=target, ylim=ylim, height=height,
             )
-            return self.nearest_hover(self.force_plot_height(plot, height))
+            return self._own_axes(plot, height)
         except Exception as exc:  # pragma: no cover
-            return pn.pane.Alert(f"MPE trend failed: {exc}", alert_type="danger")
+            return surface_error("MPE trend", exc)
 
     def ce_trend_plot(self, height: int = PLOT_HEIGHT):
         """Coulombic efficiency vs cycle number across runs.
@@ -471,9 +487,9 @@ class ResultsStep(BaseStep):
                 ylabel="Coulombic efficiency (%)",
                 title=f"CE per cycle ({basis}-based)", ylim=ylim, height=height,
             )
-            return self.nearest_hover(self.force_plot_height(plot, height))
+            return self._own_axes(plot, height)
         except Exception as exc:  # pragma: no cover
-            return pn.pane.Alert(f"CE trend failed: {exc}", alert_type="danger")
+            return surface_error("CE trend", exc)
 
     def _run_cycle_rel(self, data, state, q, zero: bool) -> pl.DataFrame:
         """Cycle-relative ``[timestamp, cycle, t_rel_s, value]`` for one run over
@@ -521,16 +537,16 @@ class ResultsStep(BaseStep):
                 title = f"{q.label} per cycle · all runs{zsuffix}"
                 plot = self._with_ylim(plots.cycle_overlay_runs(frame, q, title, height=height),
                                        frame, ["value"])
-                return self.nearest_hover(self.force_plot_height(plot, height))
+                return self._own_axes(plot, height)
 
             rel = self._run_cycle_rel(self.data, state, q, zero)
             if rel.is_empty():
                 return self.empty_state("No cycles to overlay.")
             title = f"{q.label} per cycle{zsuffix}"
             plot = self._with_ylim(plots.cycle_overlay(rel, q, title, height=height), rel, ["value"])
-            return self.nearest_hover(self.force_plot_height(plot, height))
+            return self._own_axes(plot, height)
         except Exception as exc:  # pragma: no cover
-            return pn.pane.Alert(f"Cycle overlay failed: {exc}", alert_type="danger")
+            return surface_error("Cycle overlay", exc)
 
     def _per_cycle_frame(self) -> pl.DataFrame:
         """Per-cycle stats frame shared by the table and its CSV export."""
@@ -597,8 +613,7 @@ class ResultsStep(BaseStep):
             frame = pl.DataFrame({
                 "t_s": t, "rate_norm": _norm(rate), "neg_current_norm": _norm(-cur),
             })
-            plot = self.nearest_hover(self.force_plot_height(
-                plots.alignment_overlay(frame, height=height), height))
+            plot = self._own_axes(plots.alignment_overlay(frame, height=height), height)
 
             est = science.alignment_lag(df)
             dt = float(np.median(np.diff(t))) if t.size > 1 else 0.0
@@ -620,7 +635,7 @@ class ResultsStep(BaseStep):
                                    margin=0, sizing_mode="stretch_width")
             return pn.Column(plot, readout, margin=0, sizing_mode="stretch_width")
         except Exception as exc:  # pragma: no cover
-            return pn.pane.Alert(f"Alignment check failed: {exc}", alert_type="danger")
+            return surface_error("Alignment check", exc)
 
     def per_cycle_table(self):
         try:
@@ -631,7 +646,7 @@ class ResultsStep(BaseStep):
                 return self.empty_state("No cycles in the current selection.")
             return self._render_cycle_table(stats)
         except Exception as exc:  # pragma: no cover
-            return pn.pane.Alert(f"Per-cycle table failed: {exc}", alert_type="danger")
+            return surface_error("Per-cycle table", exc)
 
     def _render_cycle_table(self, stats: pl.DataFrame):
         try:
@@ -647,7 +662,7 @@ class ResultsStep(BaseStep):
                 css_classes=["summary-table"],
             )
         except Exception as exc:  # pragma: no cover
-            return pn.pane.Alert(f"Per-cycle table failed: {exc}", alert_type="danger")
+            return surface_error("Per-cycle table", exc)
 
     # --- plots -------------------------------------------------------------
     def primary_echem_plot(self, height: int = RESULTS_PLOT_HEIGHT):
@@ -668,7 +683,7 @@ class ResultsStep(BaseStep):
                                                "Current vs potential (CV) · all runs",
                                                by_cycle=True, monotonic=False, height=height)
                 plot = self._with_ylim(plot, frame, [ycol], pct=ypct)
-                return self.nearest_hover(self.force_plot_height(plot, height))
+                return self._own_axes(plot, height)
             wf = self._selected_waveform()
             if cp:
                 plot = plots.echem_curve(wf, _T, _E, _T_LABEL, _E_LABEL, "Potential vs time (CP)",
@@ -679,9 +694,9 @@ class ResultsStep(BaseStep):
                                          show_legend=self._has_cycles,
                                          direction_arrows=True)
             plot = self._with_ylim(plot, wf, [ycol], pct=ypct)
-            return self.nearest_hover(self.force_plot_height(plot, height))
+            return self._own_axes(plot, height)
         except Exception as exc:  # pragma: no cover
-            return pn.pane.Alert(f"Plot failed: {exc}", alert_type="danger")
+            return surface_error("Plot", exc)
 
     def _mass_plot(self, x_key: str, height: int):
         state = self.controls.state()
@@ -695,7 +710,7 @@ class ResultsStep(BaseStep):
             select_x=False, height=height,
         )
         plot = self._with_ylim(plot, value_df, ["value"])
-        return self.nearest_hover(self.force_plot_height(plot, height))
+        return self._own_axes(plot, height)
 
     def mass_vs_potential(self, height: int = PLOT_HEIGHT):
         try:
@@ -709,7 +724,7 @@ class ResultsStep(BaseStep):
                 x_key = "potential"
             return self._mass_plot(x_key, height)
         except Exception as exc:  # pragma: no cover
-            return pn.pane.Alert(f"Mass plot failed: {exc}", alert_type="danger")
+            return surface_error("Mass plot", exc)
 
     def mass_vs_charge(self, height: int = PLOT_HEIGHT):
         """Mass vs charge (Δm–Q). Its slope is the apparent molar mass per electron
@@ -719,7 +734,7 @@ class ResultsStep(BaseStep):
                 "potential" if self.data.has_echem() else "time")
             return self._mass_plot(x_key, height)
         except Exception as exc:  # pragma: no cover
-            return pn.pane.Alert(f"Mass-vs-charge plot failed: {exc}", alert_type="danger")
+            return surface_error("Mass-vs-charge plot", exc)
 
     def potential_vs_capacity(self, height: int = PLOT_HEIGHT):
         """CP voltage profile: potential vs charge (capacity) per cycle.
@@ -738,16 +753,16 @@ class ResultsStep(BaseStep):
                                            "Voltage profile (potential vs charge) · all runs",
                                            by_cycle=True, monotonic=False, height=height)
                 plot = self._with_ylim(plot, frame, [_E])
-                return self.nearest_hover(self.force_plot_height(plot, height))
+                return self._own_axes(plot, height)
             wf = self._selected_waveform()
             plot = plots.echem_curve(wf, _Q, _E, _Q_LABEL, _E_LABEL,
                                      "Voltage profile (potential vs charge)",
                                      by_cycle=True, monotonic=False, height=height,
                                      show_legend=self._has_cycles)
             plot = self._with_ylim(plot, wf, [_E])
-            return self.nearest_hover(self.force_plot_height(plot, height))
+            return self._own_axes(plot, height)
         except Exception as exc:  # pragma: no cover
-            return pn.pane.Alert(f"Voltage profile failed: {exc}", alert_type="danger")
+            return surface_error("Voltage profile", exc)
 
     def density_vs_potential(self, height: int = COMPACT_PLOT_HEIGHT):
         try:
@@ -762,15 +777,15 @@ class ResultsStep(BaseStep):
                                            "Current density vs potential · all runs",
                                            by_cycle=True, monotonic=False, height=height)
                 plot = self._with_ylim(plot, frame, [_J], pct=(1, 99))
-                return self.nearest_hover(self.force_plot_height(plot, height))
+                return self._own_axes(plot, height)
             wf = self._selected_waveform()
             plot = plots.echem_curve(wf, _E, _J, _E_LABEL, _J_LABEL, "Current density vs potential",
                                      by_cycle=True, monotonic=False, height=height,
                                      show_legend=False)
             plot = self._with_ylim(plot, wf, [_J], pct=(1, 99))
-            return self.nearest_hover(self.force_plot_height(plot, height))
+            return self._own_axes(plot, height)
         except Exception as exc:  # pragma: no cover
-            return pn.pane.Alert(f"Plot failed: {exc}", alert_type="danger")
+            return surface_error("Plot", exc)
 
     # --- technique-aware layout -------------------------------------------
     @staticmethod

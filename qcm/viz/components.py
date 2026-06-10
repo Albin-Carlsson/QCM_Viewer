@@ -149,15 +149,21 @@ def stat_grid(cells: list[str]) -> pn.pane.HTML:
     return _html(f"<div class='qcm-statgrid'>{''.join(cells)}</div>")
 
 
-def run_info_table(rows: list[tuple[str, str]]) -> pn.pane.HTML:
-    """A compact key/value table for the sidebar Run-info card."""
-    body = "".join(
-        "<div class='qcm-kv'>"
-        f"<span class='k'>{escape(k)}</span>"
-        f"<span class='v'>{escape(v)}</span></div>"
-        for k, v in rows
-    )
-    return _html(f"<div class='qcm-kvtable'>{body}</div>")
+def run_info_table(rows: list[tuple]) -> pn.pane.HTML:
+    """A compact key/value table for the sidebar Run-info card.
+
+    A row may carry an optional third element: a quiet secondary note rendered
+    after the value (e.g. the diameter equivalent of an electrode area).
+    """
+    cells = []
+    for key, value, *rest in rows:
+        sub = f" <span class='sub'>{escape(rest[0])}</span>" if rest and rest[0] else ""
+        cells.append(
+            "<div class='qcm-kv'>"
+            f"<span class='k'>{escape(key)}</span>"
+            f"<span class='v'>{escape(value)}{sub}</span></div>"
+        )
+    return _html(f"<div class='qcm-kvtable'>{''.join(cells)}</div>")
 
 
 def phase_row(color: str, name: str, time_range: str) -> str:

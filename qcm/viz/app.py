@@ -119,7 +119,7 @@ def _landing():
     import tempfile
 
     from qcm.profiles import import_run, resolve_import_target
-    from .runset import load_session, peek_session
+    from .runset import peek_session
 
     _ensure_app_css()
     root = pn.Column(sizing_mode="stretch_width", css_classes=["qcm-app"])

@@ -1,4 +1,3 @@
-import panel as pn
 
 from qcm.viz import nav
 

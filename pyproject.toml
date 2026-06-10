@@ -1,9 +1,26 @@
 [project]
-name = "qcm-refactor"
+name = "qcm-viewer"
 version = "0.3.0"
-description = "Interactive QCM-D viewer built with Panel, HoloViews, Polars, and DuckDB."
+description = "Interactive QCM-D and EQCM viewer built with Panel, HoloViews, Polars, and DuckDB."
 readme = "README.md"
 requires-python = ">=3.11"
+license = { text = "PolyForm-Noncommercial-1.0.0" }
+authors = [
+  { name = "Albin Carlsson", email = "albin.carlsson@protonmail.com" },
+  { name = "Uppsala University" },
+]
+keywords = ["QCM-D", "EQCM", "quartz crystal microbalance", "electrochemistry", "electrogravimetry"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Science/Research",
+  "License :: Other/Proprietary License",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Chemistry",
+  "Topic :: Scientific/Engineering :: Visualization",
+]
 dependencies = [
   "bokeh>=3.4",
   "datashader>=0.16",
@@ -36,6 +53,18 @@ include = ["qcm*"]
 
 [tool.ruff]
 line-length = 110
+# Reference and scratch notebooks are exploratory artefacts, not maintained code.
+extend-exclude = ["*.ipynb"]
+
+[tool.ruff.lint]
+# Default rule set (pyflakes F + pycodestyle E/W). The shipped `qcm/` package is
+# kept fully clean; tests and tooling scripts get the relaxations below.
+[tool.ruff.lint.per-file-ignores]
+# Test bodies and one-off tooling scripts favour compact, multi-statement lines
+# (e.g. `a = make(); b = make()` setup) — readable in context, not worth
+# splitting. Lint everything else strictly.
+"tests/*" = ["E701", "E702"]
+"tools/*" = ["E701", "E702"]
 
 [build-system]
 requires = ["setuptools>=68"]

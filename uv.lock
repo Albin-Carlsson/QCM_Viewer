@@ -2318,7 +2318,7 @@ wheels = [
 ]
 
 [[package]]
-name = "qcm-refactor"
+name = "qcm-viewer"
 version = "0.3.0"
 source = { editable = "." }
 dependencies = [

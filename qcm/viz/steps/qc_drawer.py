@@ -6,6 +6,7 @@ import panel as pn
 from .. import plots
 from ..components import empty_state, stat_badge
 from ._base import BaseStep
+from ..errors import surface_error
 
 
 class QCDrawer(BaseStep):
@@ -20,14 +21,14 @@ class QCDrawer(BaseStep):
             panels = [self.nearest_hover(p) for p in plots.sweep_curves(self.data.sweep_df(state), orders=state.orders)]
             return pn.Column(*panels, sizing_mode="stretch_width")
         except Exception as exc:  # pragma: no cover
-            return pn.pane.Alert(f"Sweep failed: {exc}", alert_type="danger")
+            return surface_error("Sweep", exc)
 
     def iq_plot(self):
         try:
             state = self.controls.state()
             return self.nearest_hover(plots.iq_scatter(self.data.sweep_df(state), f"I/Q at sweep {state.sequence}"))
         except Exception as exc:  # pragma: no cover
-            return pn.pane.Alert(f"I/Q failed: {exc}", alert_type="danger")
+            return surface_error("I/Q", exc)
 
     def waterfall_plot(self):
         try:
@@ -35,7 +36,7 @@ class QCDrawer(BaseStep):
             panels = [self.interactive_plot(p) for p in plots.waterfall(self.data.waterfall_df(state), orders=state.orders)]
             return pn.Column(*panels, sizing_mode="stretch_width")
         except Exception as exc:  # pragma: no cover
-            return pn.pane.Alert(f"Waterfall failed: {exc}", alert_type="danger")
+            return surface_error("Waterfall", exc)
 
     def qc_cards(self):
         state = self.controls.state()

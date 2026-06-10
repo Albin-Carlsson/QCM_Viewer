@@ -10,6 +10,7 @@ from ..components import hint
 from .. import plots
 from ..theme import PLOT_HEIGHT, quantity
 from ._base import BaseStep
+from ..errors import surface_error
 
 _US = 1_000_000
 
@@ -39,7 +40,7 @@ class PhasesStep(BaseStep):
             plot = self.with_phase_labels(plot, value_df, height=PLOT_HEIGHT)
             return self.interactive_plot(self.force_plot_height(plot, PLOT_HEIGHT))
         except Exception as exc:  # pragma: no cover
-            return pn.pane.Alert(f"Phase plot failed: {exc}", alert_type="danger")
+            return surface_error("Phase plot", exc)
 
     def phases_table(self):
         _ = self.controls.annotation_version.value
@@ -88,7 +89,7 @@ class PhasesStep(BaseStep):
                 height=min(360, max(120, 42 + df.height * 30)),
             )
         except Exception as exc:  # pragma: no cover
-            return pn.pane.Alert(f"Phase matrix failed: {exc}", alert_type="danger")
+            return surface_error("Phase matrix", exc)
 
     def phase_rollup(self):
         try:
@@ -116,7 +117,7 @@ class PhasesStep(BaseStep):
                 height=min(300, max(120, 42 + out.height * 30)),
             )
         except Exception as exc:  # pragma: no cover
-            return pn.pane.Alert(f"Phase rollup failed: {exc}", alert_type="danger")
+            return surface_error("Phase rollup", exc)
 
     def phase_response_ranking(self):
         try:
@@ -140,7 +141,7 @@ class PhasesStep(BaseStep):
                 height=min(300, max(120, 42 + out.height * 30)),
             )
         except Exception as exc:  # pragma: no cover
-            return pn.pane.Alert(f"Phase ranking failed: {exc}", alert_type="danger")
+            return surface_error("Phase ranking", exc)
 
     def anchor_plot(self):
         # Same unified plot as every other page; highlights the draft mark range.

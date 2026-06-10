@@ -11,6 +11,7 @@ import panel as pn
 import polars as pl
 
 from ._base import BaseStep
+from ..errors import surface_error
 
 _US = 1_000_000
 
@@ -66,4 +67,4 @@ class QuantifyStep(BaseStep):
                 css_classes=["summary-table", "target-summary-table"],
             )
         except Exception as exc:  # pragma: no cover
-            return pn.pane.Alert(f"Target summary failed: {exc}", alert_type="danger")
+            return surface_error("Target summary", exc)

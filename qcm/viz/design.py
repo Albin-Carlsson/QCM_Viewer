@@ -332,15 +332,27 @@ html, body {
 .qcm-hint.info { border: 1px solid var(--qcm-accent-border); background: var(--qcm-accent-soft); color: var(--qcm-accent-strong); }
 .qcm-hint.warning { border: 1px solid var(--qcm-warning-border); background: var(--qcm-warning-soft); color: var(--qcm-warning-text); }
 
-.qcm-kvtable { display: flex; flex-direction: column; gap: 2px; }
-.qcm-kv { display: flex; align-items: baseline; justify-content: space-between; gap: var(--qcm-space-3); padding: 3px 0; }
-.qcm-kv .k { color: var(--qcm-muted); font-size: var(--qcm-fs-label); flex: 0 0 auto; }
+/* Key/value rows (sidebar Run info): a two-column grid with hairline row
+   separators — the label column hugs its content, the value gets the rest. */
+.qcm-kvtable { display: flex; flex-direction: column; }
+.qcm-kv {
+  display: grid; grid-template-columns: minmax(82px, auto) minmax(0, 1fr);
+  column-gap: var(--qcm-space-3); align-items: baseline; padding: 6px 2px;
+}
+.qcm-kv + .qcm-kv { border-top: 1px solid var(--qcm-border); }
+.qcm-kv .k {
+  color: var(--qcm-muted); font-size: var(--qcm-fs-caption);
+  font-weight: 600; letter-spacing: .02em;
+}
 /* Long run ids / file-derived values must wrap inside the card, never spill
-   past the sidebar edge. min-width:0 lets the flex item actually shrink. */
+   past the sidebar edge. min-width:0 lets the grid track actually shrink. */
 .qcm-kv .v {
-  color: var(--qcm-text); font-size: var(--qcm-fs-label); font-weight: 700;
+  color: var(--qcm-text); font-size: var(--qcm-fs-label); font-weight: 650;
   text-align: right; min-width: 0; overflow-wrap: anywhere; word-break: break-word;
 }
+/* Secondary half of a value ("⌀ 12.0 mm") stays quiet next to the figure and
+   wraps as one unit instead of orphaning its first character. */
+.qcm-kv .v .sub { color: var(--qcm-muted); font-weight: 500; display: inline-block; white-space: nowrap; }
 
 .qcm-defs { display: flex; flex-direction: column; gap: var(--qcm-space-2); }
 .qcm-def { display: grid; grid-template-columns: 84px 1fr; gap: var(--qcm-space-3); align-items: baseline; }

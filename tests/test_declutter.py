@@ -51,7 +51,6 @@ def test_thin_cycles_passthrough_and_subset():
 
 
 def test_echem_curve_thins_title_and_traces():
-    import numpy as np
     n_cycles = 60
     rows = []
     for c in range(1, n_cycles + 1):

@@ -16,6 +16,7 @@ from ..actions import ViewerActions
 from ..components import empty_state
 from ..controls import ViewerControls
 from ..data import QCMViewData
+from ..errors import surface_error
 
 _US = 1_000_000
 
@@ -415,7 +416,7 @@ class BaseStep:
                 plot = plot * faraday
             return self._finish_anchor(plot, ax, q, height, show_legend, label_df=value_df)
         except Exception as exc:  # pragma: no cover
-            return pn.pane.Alert(f"Plot failed: {exc}", alert_type="danger")
+            return surface_error("Plot", exc)
 
     @staticmethod
     def _quantity_caveats(state, q) -> str:

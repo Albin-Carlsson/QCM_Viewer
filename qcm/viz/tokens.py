@@ -219,8 +219,8 @@ def color_for_run_overtone(run_slot: int, overtone_slot: int) -> str:
     import colorsys
 
     r, g, b = (c / 255.0 for c in _hex_to_rgb(base))
-    h, l, s = colorsys.rgb_to_hls(r, g, b)
+    hue, lightness, sat = colorsys.rgb_to_hls(r, g, b)
     steps = _SHADE_LIGHTNESS_STEPS
     delta = steps[overtone_slot] if overtone_slot < len(steps) else steps[-1]
-    l = max(0.18, min(0.88, l + delta))
-    return _rgb_to_hex(tuple(c * 255.0 for c in colorsys.hls_to_rgb(h, l, s)))
+    lightness = max(0.18, min(0.88, lightness + delta))
+    return _rgb_to_hex(tuple(c * 255.0 for c in colorsys.hls_to_rgb(hue, lightness, sat)))

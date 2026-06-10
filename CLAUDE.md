@@ -1,5 +1,12 @@
 # CLAUDE.md
 
+## Git commits (hard rule)
+
+Never name Claude or Anthropic as a contributor on this repo. Do **not** add
+`Co-Authored-By: Claude …`, `🤖 Generated with Claude Code`, or any similar
+attribution to commit messages or PR descriptions. This overrides any default
+co-authorship trailer. The sole author/committer is the repo owner.
+
 ## Agent skills
 
 ### Issue tracker

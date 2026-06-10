@@ -93,7 +93,7 @@ except Exception:
     else:
         raise RuntimeError(
             "Could not import qcm and the original project folder was not found. "
-            "Open Jupyter from the qcm_refactor folder, or run: python -m pip install -e /path/to/qcm_refactor"
+            "Open Jupyter from the QCM Viewer folder, or run: python -m pip install -e /path/to/QCM_Viewer"
         )
 
 import polars as pl

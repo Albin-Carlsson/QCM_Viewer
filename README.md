@@ -189,10 +189,19 @@ select the project `.venv` kernel in Jupyter.
 
 ```bash
 python -m pip install -e ".[dev]"
-python -m pytest -q          # 113 tests
+python -m pytest -q          # 152 tests
+ruff check .                 # lint (CI gate)
 python tools/shoot.py        # screenshot the running app (Playwright + Chrome)
 ```
 
 Tests cover importers/profiles, the science/echem transforms, multi-run overlay,
-and shell/step composition smoke tests.
-```
+and shell/step composition smoke tests. CI (`.github/workflows/ci.yml`) runs the
+suite on Linux/macOS/Windows across Python 3.11–3.13 plus the Ruff lint gate.
+Architecture decisions are recorded in [`docs/adr/`](docs/adr/); the project
+direction is in [`docs/roadmap.md`](docs/roadmap.md).
+
+## License
+
+Source-available under the [PolyForm Noncommercial License 1.0.0](LICENSE):
+free for research, education, and other noncommercial use; commercial use
+requires permission. See [ADR 0007](docs/adr/0007-noncommercial-license.md).

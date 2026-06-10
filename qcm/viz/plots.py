@@ -24,7 +24,6 @@ from .theme import (
     PLOT_HEIGHT,
     COMPACT_PLOT_HEIGHT,
     SWEEP_PANEL_HEIGHT,
-    WATERFALL_PANEL_HEIGHT,
     Axis,
     Quantity,
     color_for_run_overtone,

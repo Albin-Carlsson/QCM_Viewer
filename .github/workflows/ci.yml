@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same ref so a quick succession of pushes
+# doesn't pile up the 9-job matrix.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install Ruff
+        run: uv pip install --system "ruff>=0.5"
+      - name: Lint
+        run: ruff check .
+
+  test:
+    name: Tests (${{ matrix.os }} · py${{ matrix.python-version }})
+    needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.11", "3.12", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      # The test suite is self-contained: conftest synthesizes the EQCM run it
+      # needs, so no external data or browser is required.
+      - name: Install package + dev deps
+        run: uv pip install --system -e ".[dev]"
+      - name: Run tests
+        run: python -m pytest -q --cov=qcm --cov-report=term-missing --cov-fail-under=65

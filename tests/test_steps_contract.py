@@ -1,6 +1,5 @@
 import panel as pn
 
-from qcm.viz import nav
 
 
 def _viewer(demo_run_path):

@@ -134,7 +134,8 @@ def test_cycle_trend_marker_per_run_and_series():
 
 def test_multi_augmented_has_mpe_and_ce(tmp_path):
     # Build two CP runs via the viewer and check the augmented frame the trend reads.
-    import json, shutil
+    import json
+    import shutil
     from qcm.viz.app import QCMViewer
     src = "/tmp/real-echem-run"
     import os
