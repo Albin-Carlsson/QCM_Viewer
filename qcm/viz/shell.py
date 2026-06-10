@@ -455,18 +455,15 @@ class ViewerShell:
         return pn.bind(render, self.mode)
 
     def _build_sidebar(self):
-        help_btn = pn.widgets.Button(label="Help & shortcuts", icon="help", button_type="default",
-                                     sizing_mode="stretch_width")
-        help_btn.on_click(lambda _e: self.actions.notify(
-            "Drag on the plot to set the active range · click a point to load that sweep · "
-            "use Selection mode to switch what a drag targets.", "info"))
+        # No help button: the selection-mode explainer on the Data page carries
+        # the same content where it is actually needed, and the UI should speak
+        # for itself.
         return pn.Column(
             brand("QCM-D Viewer"),
             self._nav(),
             self._runs_card(),
             self._run_info_card(),
             pn.layout.Spacer(css_classes=["qcm-sidebar-spacer"]),
-            pn.Column(help_btn, margin=0, sizing_mode="stretch_width", css_classes=["qcm-help"]),
             margin=0, css_classes=["qcm-sidebar"],
         )
 
@@ -487,6 +484,22 @@ class ViewerShell:
                                     description="Open the raw resonance sweeps and I/Q traces for QC.",
                                     sizing_mode="fixed")
         inspect.on_click(self._open_drawer)
+
+        # Fit-only imports (standardized CSV / Qsoft) have no raw sweeps: opening
+        # the drawer would just dim the page onto an empty-state note, which
+        # reads as a broken grey screen. Disable with an explanation instead,
+        # tracking the active run.
+        def _sync_inspect(*_):
+            has_raw = bool(getattr(self.data, "has_raw", lambda: True)())
+            inspect.disabled = not has_raw
+            inspect.description = (
+                "Open the raw resonance sweeps and I/Q traces for QC."
+                if has_raw else
+                "This run was imported from fitted Fr/D values — it has no raw "
+                "sweeps to inspect."
+            )
+        _sync_inspect()
+        self.controls.runset_version.param.watch(_sync_inspect, "value")
         # Hug content so the group stays tight on the right (the shared save button
         # otherwise inherits stretch_width from its definition).
         self.controls.save_state_button.sizing_mode = "fixed"

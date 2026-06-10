@@ -519,12 +519,14 @@ def cycle_overlay_runs(frame: pl.DataFrame, q: Quantity, title: str, height: int
 
 
 def _autohide_toolbar_hook(plot, _element):
-    """Let the Bokeh tool palette appear on hover instead of always occupying
-    space at the plot's right edge — a cleaner resting state."""
-    try:
-        plot.state.toolbar.autohide = True
-    except Exception:
-        pass
+    """Keep the Bokeh tool palette (incl. the reset button) always visible.
+
+    This used to set ``toolbar.autohide = True`` for a cleaner resting state,
+    but a hidden-until-hover toolbar made "reset the plot scale" undiscoverable
+    — a hard requirement from user feedback. The hook is kept (as a no-op) so
+    every existing call site stays a single point of policy.
+    """
+    return None
 
 
 def _xy_axis(value_df: pl.DataFrame, group: int, monotonic: bool, max_points: int = MAX_PLOT_POINTS):
@@ -670,7 +672,7 @@ def analysis_timeline(
         comp_groups = list(groups if companion_groups is None else companion_groups)
         d_vals = companion_df.filter(pl.col("group").is_in(comp_groups)).drop_nulls("value")["value"]
         if d_vals.len():
-            d_lo, d_hi = float(d_vals.min()), float(d_vals.max())
+            d_lo, d_hi = _robust_bounds(d_vals)
         for slot, g in enumerate(groups):
             if g not in comp_groups:
                 continue
@@ -830,15 +832,36 @@ def overlay_timeline(
     )
 
 
+def _robust_bounds(values, lo_default: float = 0.0, hi_default: float = 1.0):
+    """p1–p99 bounds for a secondary-axis range, so one spike can't flatten the
+    whole companion trace to a sliver (raw min/max did exactly that)."""
+    try:
+        arr = values.drop_nulls().to_numpy() if hasattr(values, "drop_nulls") else np.asarray(values)
+        arr = arr[np.isfinite(arr)]
+        if arr.size < 2:
+            return lo_default, hi_default
+        lo, hi = (float(v) for v in np.percentile(arr, [1, 99]))
+        if hi <= lo:
+            return float(arr.min()), float(arr.max() or arr.min() + 1.0)
+        return lo, hi
+    except Exception:
+        return lo_default, hi_default
+
+
 def _twin_axis_hook(d_lo: float, d_hi: float, axis_label: str):
-    """Route dashed (ΔD) glyphs to a second right-hand y-axis."""
+    """Route dashed (companion) glyphs to a second right-hand y-axis."""
     def hook(plot, _element):
         from bokeh.models import LinearAxis, Range1d
 
         fig = plot.state
         pad = (d_hi - d_lo) * 0.08 or 1.0
         if "rhs" not in fig.extra_y_ranges:
-            fig.extra_y_ranges = {**fig.extra_y_ranges, "rhs": Range1d(d_lo - pad, d_hi + pad)}
+            rng = Range1d(d_lo - pad, d_hi + pad)
+            # Remember the home window so the reset tool restores BOTH axes
+            # (an unset reset bound leaves the twin axis stuck after zoom).
+            rng.reset_start = rng.start
+            rng.reset_end = rng.end
+            fig.extra_y_ranges = {**fig.extra_y_ranges, "rhs": rng}
             fig.add_layout(LinearAxis(y_range_name="rhs", axis_label=axis_label), "right")
         for r in fig.renderers:
             glyph = getattr(r, "glyph", None)
@@ -901,8 +924,7 @@ def dual_axis_qcmd(
         return empty("No QCM-D data")
 
     d_vals = d_df.filter(pl.col("group").is_in(dissipation_groups)).drop_nulls("value")["value"]
-    d_lo = float(d_vals.min()) if d_vals.len() else 0.0
-    d_hi = float(d_vals.max()) if d_vals.len() else 1.0
+    d_lo, d_hi = _robust_bounds(d_vals)
 
     elements = (
         list(window_elements(window))
@@ -988,13 +1010,13 @@ def potential_strip(
         lo, hi = sorted(float(v) for v in window)
         elements.append(hv.VSpan(lo, hi).opts(color=BASELINE_COLOR, fill_alpha=0.35))
     elements.append(
-        hv.Curve((x, y), X_LABEL, "E [V]").opts(color=EVENT_COLOR, line_width=1.1)
+        hv.Curve((x, y), X_LABEL, "Potential [V]").opts(color=EVENT_COLOR, line_width=1.1)
     )
     return hv.Overlay(elements).opts(
         hv.opts.Overlay(
             height=height, responsive=True, show_legend=False, show_grid=True,
-            xlabel="", ylabel="E [V]", toolbar=None,
-            hooks=[_autohide_toolbar_hook],
+            xlabel=X_LABEL, ylabel="Potential [V]", toolbar=None,
+            fontsize={"xlabel": "8pt", "ylabel": "8pt", "xticks": "7pt", "yticks": "7pt"},
         ),
     )
 

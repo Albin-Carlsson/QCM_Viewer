@@ -138,15 +138,6 @@ class ViewerControls:
         }
         self.group_options = group_options
         saved_groups = [str(g) for g in self.saved.get("groups", self.info.groups) if g in self.info.groups]
-        if "groups" not in self.saved:
-            # Fresh run: default to the overtones practitioners actually read
-            # (n = 3, 5, 7 — the fundamental is unreliable and the high
-            # overtones mostly restate them; all stay one click away). A run
-            # without that subset keeps everything on.
-            preferred = [str(g) for g in self.info.groups
-                         if self.info.orders.get(g, 1) in DEFAULT_VISIBLE_OVERTONES]
-            if preferred:
-                saved_groups = preferred
         default_orders = ", ".join(f"g{g}:n={n}" for g, n in sorted(self.info.orders.items()))
 
         self.group_select = pn.widgets.CheckButtonGroup(
@@ -194,20 +185,26 @@ class ViewerControls:
         self.overtone_dissipation_all_button.on_click(lambda _event: self.toggle_overtone_column("dissipation"))
         self.overtone_normalize_all_button.on_click(lambda _event: self.toggle_overtone_column("normalize"))
         saved_overtone_controls = self.saved.get("overtone_controls", {})
+        # Fresh runs default the Signals rows to the overtones practitioners
+        # actually read (n = 3, 5, 7) — every other row is one click away in the
+        # same card. A run without that subset keeps everything on.
+        run_orders = {int(self.info.orders.get(g, 1)) for g in self.info.groups}
+        subset_applies = bool(run_orders & set(DEFAULT_VISIBLE_OVERTONES))
         for g in self.info.groups:
             n = int(self.info.orders.get(g, 1))
             key = str(g)
             saved_row = saved_overtone_controls.get(key, {}) if isinstance(saved_overtone_controls, dict) else {}
+            default_on = (n in DEFAULT_VISIBLE_OVERTONES) if subset_applies else True
             # Names are intentionally empty: the column headers label these, so a
             # bare centered box per cell reads as a clean signal-selection table.
             self.overtone_frequency[g] = pn.widgets.Checkbox(
                 label="",
-                value=bool(saved_row.get("frequency", True)),
+                value=bool(saved_row.get("frequency", default_on)),
                 sizing_mode="stretch_width",
             )
             self.overtone_dissipation[g] = pn.widgets.Checkbox(
                 label="",
-                value=bool(saved_row.get("dissipation", True)),
+                value=bool(saved_row.get("dissipation", default_on)),
                 sizing_mode="stretch_width",
             )
             self.overtone_normalize[g] = pn.widgets.Checkbox(
@@ -227,6 +224,11 @@ class ViewerControls:
         for col in (self.overtone_frequency, self.overtone_dissipation, self.overtone_normalize):
             for cb in col.values():
                 cb.param.watch(self._bump_overtone_version, "value")
+        # The Signals card is the ONE channel control: a channel is queried iff
+        # its Δf or ΔD box is on. group_select is the (unmounted) backing store
+        # for state.groups, kept in sync here — never a second UI surface.
+        if "groups" not in self.saved:
+            self.group_select.value = self._signals_group_values() or list(group_options.values())
 
         current_default = self._clean_range(self.saved.get("t_range_s", [0.0, self.info.span_s]))
         reference_default = self._clean_range(
@@ -431,13 +433,15 @@ class ViewerControls:
             except (TypeError, ValueError):
                 return None
 
+        # Bare boxes (the toolcell eyebrow labels the pair); placeholders carry
+        # the min/max roles so the cell stays one input-row tall.
         self.y_min = pn.widgets.FloatInput(
-            label="Y min", value=_opt_float(self.saved.get("y_lo")), placeholder="auto",
-            sizing_mode="stretch_width", css_classes=["compact-num"],
+            label="", value=_opt_float(self.saved.get("y_lo")), placeholder="min (auto)",
+            width=92, css_classes=["compact-num"],
         )
         self.y_max = pn.widgets.FloatInput(
-            label="Y max", value=_opt_float(self.saved.get("y_hi")), placeholder="auto",
-            sizing_mode="stretch_width", css_classes=["compact-num"],
+            label="", value=_opt_float(self.saved.get("y_hi")), placeholder="max (auto)",
+            width=92, css_classes=["compact-num"],
         )
         # A second Y-axis only makes sense as a vs-time comparison of two distinct
         # signals: disable it on cross-plots (vs potential/charge/cycle) and never
@@ -588,7 +592,9 @@ class ViewerControls:
         # intentionally NOT separate triggers, otherwise one slider drag fires up
         # to three full rebuilds (slider + both synced number boxes) and feels laggy.
         return (
-            self.group_select,
+            # group_select is deliberately NOT here: it is synced from the
+            # Signals checkboxes inside _bump_overtone_version, and listing it
+            # too would fire a second rebuild per gesture.
             self.orders_text,
             *self.overtone_signal_inputs,
             *self.param_inputs,
@@ -651,9 +657,23 @@ class ViewerControls:
             return self.overtone_normalize
         raise ValueError(f"Unknown overtone control column: {column}")
 
+    def _signals_group_values(self) -> list[str]:
+        """Channels with at least one of Δf/ΔD checked, as group_select values."""
+        return [
+            str(g) for g in self.info.groups
+            if bool(self.overtone_frequency[g].value) or bool(self.overtone_dissipation[g].value)
+        ]
+
     def _bump_overtone_version(self, _event=None) -> None:
-        if not self._suspend_overtone_bump:
-            self.overtone_version.value += 1
+        if self._suspend_overtone_bump:
+            return
+        # Sync the queried group set BEFORE the single rebuild trigger fires, so
+        # checking a box on a previously-off channel actually brings its data
+        # back (group_select itself is not a reactive input — see signal_inputs).
+        synced = self._signals_group_values()
+        if synced and synced != list(self.group_select.value):
+            self.group_select.value = synced
+        self.overtone_version.value += 1
 
     def toggle_overtone_column(self, column: str) -> None:
         """Set a whole checkbox column at once, firing a single rebuild."""
@@ -762,8 +782,10 @@ class ViewerControls:
         return pn.Card(
             self.param_area, pn.bind(geom, self.param_area),
             self.param_sensitivity,
-            pn.Row(self.param_f0, self.param_f0_apply, margin=0,
-                   css_classes=["param-f0-row"]),
+            # Stacked, not side-by-side: a Row of two stretch widgets overflows
+            # the fixed-width rail card.
+            self.param_f0,
+            self.param_f0_apply,
             self.param_molar_mass, self.param_valency,
             pn.bind(target, *self.param_inputs),
             self.faraday_show,
@@ -1303,10 +1325,16 @@ class ViewerControls:
                 css_classes=["overtone-controls-row", "overtone-controls-head"],
             )
         )
-        multi_channel = len(self.info.groups) > 1
+        # Overtone-first naming — chemists think in n, not channel slots. The
+        # channel index only appears when two channels share the same order.
+        order_counts: dict[int, int] = {}
+        for g in self.info.groups:
+            order_counts[self.info.orders.get(g, 1)] = order_counts.get(self.info.orders.get(g, 1), 0) + 1
         for slot, g in enumerate(self.info.groups):
             n = self.info.orders.get(g, 1)
-            row_label = f"Ch {slot + 1} · n={n}" if multi_channel else f"n = {n}"
+            row_label = "fundamental (n = 1)" if n == 1 else f"n = {n}"
+            if order_counts.get(n, 1) > 1:
+                row_label += f" · ch {slot + 1}"
             rows.append(
                 pn.Row(
                     pn.pane.HTML(f"<span class='ot-n'>{row_label}</span>", margin=0),

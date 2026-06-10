@@ -195,6 +195,12 @@ html, body {
 .qcm-toolcell, .qcm-toolcell.grow { display: flex; flex-direction: column; gap: 3px; flex: 1 1 0; min-width: 0; }
 /* the Display checkboxes need only their own width, so let the selects take the rest */
 .qcm-toolbar2 > .qcm-toolcell-display { flex: 0 0 auto; }
+/* Y-window cell: two bare numeric boxes, never wider than their inputs. */
+.qcm-toolbar2 > .qcm-toolcell-ylim { flex: 0 0 auto; }
+.qcm-toolcell-ylim .qcm-ylim-inputs { gap: 4px; }
+.qcm-toolcell-ylim .bk-input { height: 26px; padding: 0 6px; font-size: var(--qcm-fs-label); }
+.qcm-toolcell-ylim .bk-input-group { margin: 0; }
+.qcm-toolcell-ylim label { display: none; }
 .qcm-toolcell > .eyebrow { padding: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .qcm-toolcell .bk-input-group { margin: 0; }
 .qcm-toolcell .compact-select { width: 100%; min-width: 0; }
@@ -314,8 +320,13 @@ html, body {
 
 .qcm-kvtable { display: flex; flex-direction: column; gap: 2px; }
 .qcm-kv { display: flex; align-items: baseline; justify-content: space-between; gap: var(--qcm-space-3); padding: 3px 0; }
-.qcm-kv .k { color: var(--qcm-muted); font-size: var(--qcm-fs-label); }
-.qcm-kv .v { color: var(--qcm-text); font-size: var(--qcm-fs-label); font-weight: 700; text-align: right; }
+.qcm-kv .k { color: var(--qcm-muted); font-size: var(--qcm-fs-label); flex: 0 0 auto; }
+/* Long run ids / file-derived values must wrap inside the card, never spill
+   past the sidebar edge. min-width:0 lets the flex item actually shrink. */
+.qcm-kv .v {
+  color: var(--qcm-text); font-size: var(--qcm-fs-label); font-weight: 700;
+  text-align: right; min-width: 0; overflow-wrap: anywhere; word-break: break-word;
+}
 
 .qcm-defs { display: flex; flex-direction: column; gap: var(--qcm-space-2); }
 .qcm-def { display: grid; grid-template-columns: 84px 1fr; gap: var(--qcm-space-3); align-items: baseline; }

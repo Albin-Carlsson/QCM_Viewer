@@ -64,3 +64,18 @@ def test_echem_curve_thins_title_and_traces():
     import holoviews as hv
     curves = [e for e in plot.values() if isinstance(e, hv.Curve)]
     assert len(curves) == MAX_PLOTTED_CYCLES
+
+
+def test_checking_a_signals_box_restores_the_channel():
+    """The Signals card is the single channel control: ticking Δf on an
+    off-by-default channel must bring its group back into the query set
+    (the old hidden group_select left the checkbox dead)."""
+    orders = {g: n for g, n in zip(range(7), (1, 3, 5, 7, 9, 11, 13))}
+    c = ViewerControls(_info(orders), {})
+    g_fund = 0  # n = 1, off by default
+    assert str(g_fund) not in c.group_select.value
+    c.overtone_frequency[g_fund].value = True
+    assert str(g_fund) in c.group_select.value
+    # and unticking both boxes removes it again
+    c.overtone_frequency[g_fund].value = False
+    assert str(g_fund) not in c.group_select.value

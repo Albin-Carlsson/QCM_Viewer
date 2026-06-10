@@ -18,7 +18,13 @@ def _controls(n_groups=7):
         t0_us=0, t1_us=10_000_000, span_s=10.0, fmin=4e6, fmax=4.1e8,
         seq_min=0, seq_max=9, n_sweeps=10,
     )
-    return ViewerControls(info, {})
+    # Saved all-on state so these tests start from every box checked (fresh-run
+    # defaults are the n=3,5,7 subset — covered in test_declutter).
+    saved = {"overtone_controls": {
+        str(g): {"frequency": True, "dissipation": True, "normalize_frequency": True}
+        for g in groups
+    }}
+    return ViewerControls(info, saved)
 
 
 def test_signal_inputs_contain_funnel_not_checkboxes():
