@@ -47,11 +47,11 @@ class ReportStep(BaseStep):
     def __init__(self, controls, data, actions):
         super().__init__(controls, data, actions)
         self.include = pn.widgets.CheckBoxGroup(
-            name="", options=_SECTIONS, value=list(_SECTIONS), sizing_mode="stretch_width",
+            label="", options=_SECTIONS, value=list(_SECTIONS), sizing_mode="stretch_width",
             stylesheets=[_CHECKBOX_CSS],
         )
         self.data_format = pn.widgets.Select(
-            name="", options={"Parquet (.parquet)": "parquet", "CSV (.csv)": "csv"},
+            label="", options={"Parquet (.parquet)": "parquet", "CSV (.csv)": "csv"},
             value="parquet", sizing_mode="stretch_width", css_classes=["compact-select"],
         )
         self.data_dl = pn.widgets.FileDownload(

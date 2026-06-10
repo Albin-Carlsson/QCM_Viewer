@@ -108,7 +108,7 @@ def _landing():
         "Pick a run folder, or a QCM instrument file (.csv / .txt) or parquet, then Open.",
         alert_type="light", sizing_mode="stretch_width",
     )
-    open_btn = pn.widgets.Button(name="Open", button_type="primary", icon="folder-open")
+    open_btn = pn.widgets.Button(label="Open", button_type="primary", icon="folder-open")
 
     def _set(kind: str, msg: str) -> None:
         status.alert_type = kind
@@ -151,7 +151,7 @@ def _landing():
         if len(remembered) > 4:
             names += ", …"
         resume_btn = pn.widgets.Button(
-            name=f"Resume last session ({names})", button_type="default", icon="history",
+            label=f"Resume last session ({names})", button_type="default", icon="history",
         )
 
         def _resume(_event=None):

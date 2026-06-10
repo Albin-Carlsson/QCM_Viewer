@@ -59,24 +59,24 @@ class ResultsStep(BaseStep):
         self._has_cycles = len(cycles) > 1
 
         self.technique_select = pn.widgets.RadioButtonGroup(
-            name="", options={"Auto": "auto", "CV": "cv", "CP": "cp"},
+            label="", options={"Auto": "auto", "CV": "cv", "CP": "cp"},
             value="auto", button_type="default", sizing_mode="stretch_width",
             css_classes=["echem-technique-toggle"],
         )
         self.cycle_mode = pn.widgets.RadioButtonGroup(
-            name="", options={"All": "all", "Single": "individual", "Range": "range"},
+            label="", options={"All": "all", "Single": "individual", "Range": "range"},
             value="all", button_type="default", sizing_mode="stretch_width",
             css_classes=["echem-cycle-mode"],
         )
         self.cycle_select = pn.widgets.IntSlider(
-            name="Cycle", start=c_lo, end=max(c_hi, c_lo), value=c_lo, step=1,
+            label="Cycle", start=c_lo, end=max(c_hi, c_lo), value=c_lo, step=1,
             sizing_mode="stretch_width",
         )
         self.cycle_range = pn.widgets.IntRangeSlider(
-            name="Cycle range", start=c_lo, end=max(c_hi, c_lo), value=(c_lo, max(c_hi, c_lo)),
+            label="Cycle range", start=c_lo, end=max(c_hi, c_lo), value=(c_lo, max(c_hi, c_lo)),
             step=1, sizing_mode="stretch_width",
         )
-        self.cycle_zero = pn.widgets.Checkbox(name="Zero f/D at cycle start", value=True)
+        self.cycle_zero = pn.widgets.Checkbox(label="Zero f/D at cycle start", value=True)
 
     # --- inputs ------------------------------------------------------------
     @property

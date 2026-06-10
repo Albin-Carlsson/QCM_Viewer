@@ -138,7 +138,7 @@ class ViewerControls:
         default_orders = ", ".join(f"g{g}:n={n}" for g, n in sorted(self.info.orders.items()))
 
         self.group_select = pn.widgets.CheckButtonGroup(
-            name="Visible channels",
+            label="Visible channels",
             options=group_options,
             value=saved_groups or [str(g) for g in self.info.groups],
             button_type="default",
@@ -148,7 +148,7 @@ class ViewerControls:
         )
         self.group_select.param.watch(self._keep_one_channel_selected, "value")
         self.show_all_channels_button = pn.widgets.Button(
-            name="Show all channels",
+            label="Show all channels",
             button_type="default",
             icon="eye",
             sizing_mode="stretch_width",
@@ -158,21 +158,21 @@ class ViewerControls:
         self.overtone_dissipation: dict[int, pn.widgets.Checkbox] = {}
         self.overtone_normalize: dict[int, pn.widgets.Checkbox] = {}
         self.overtone_frequency_all_button = pn.widgets.Button(
-            name="All",
+            label="All",
             button_type="default",
             width=46,
             height=26,
             css_classes=["overtone-all-toggle"],
         )
         self.overtone_dissipation_all_button = pn.widgets.Button(
-            name="All",
+            label="All",
             button_type="default",
             width=46,
             height=26,
             css_classes=["overtone-all-toggle"],
         )
         self.overtone_normalize_all_button = pn.widgets.Button(
-            name="All",
+            label="All",
             button_type="default",
             width=46,
             height=26,
@@ -189,17 +189,17 @@ class ViewerControls:
             # Names are intentionally empty: the column headers label these, so a
             # bare centered box per cell reads as a clean signal-selection table.
             self.overtone_frequency[g] = pn.widgets.Checkbox(
-                name="",
+                label="",
                 value=bool(saved_row.get("frequency", True)),
                 sizing_mode="stretch_width",
             )
             self.overtone_dissipation[g] = pn.widgets.Checkbox(
-                name="",
+                label="",
                 value=bool(saved_row.get("dissipation", True)),
                 sizing_mode="stretch_width",
             )
             self.overtone_normalize[g] = pn.widgets.Checkbox(
-                name="",
+                label="",
                 value=bool(saved_row.get("normalize_frequency", True)),
                 sizing_mode="stretch_width",
             )
@@ -212,7 +212,7 @@ class ViewerControls:
         # Plain RangeSlider + explicit numeric inputs gives users both quick dragging
         # and precise entry without the cramped EditableRangeSlider boxes.
         self.t_range = pn.widgets.RangeSlider(
-            name="Time window (s)",
+            label="Time window (s)",
             start=0.0,
             end=self.info.span_s,
             value=current_default,
@@ -221,7 +221,7 @@ class ViewerControls:
             sizing_mode="stretch_width",
         )
         self.t_range_start = pn.widgets.FloatInput(
-            name="Start (s)",
+            label="Start (s)",
             value=current_default[0],
             start=0.0,
             end=self.info.span_s,
@@ -229,7 +229,7 @@ class ViewerControls:
             sizing_mode="stretch_width",
         )
         self.t_range_end = pn.widgets.FloatInput(
-            name="End (s)",
+            label="End (s)",
             value=current_default[1],
             start=0.0,
             end=self.info.span_s,
@@ -237,7 +237,7 @@ class ViewerControls:
             sizing_mode="stretch_width",
         )
         self.t_full_range_button = pn.widgets.Button(
-            name="Full range",
+            label="Full range",
             button_type="default",
             icon="arrows-maximize",
             sizing_mode="stretch_width",
@@ -245,7 +245,7 @@ class ViewerControls:
         self.t_full_range_button.on_click(self.set_full_current_range)
 
         self.baseline_range = pn.widgets.RangeSlider(
-            name="Reference window (s)",
+            label="Reference window (s)",
             start=0.0,
             end=self.info.span_s,
             value=reference_default,
@@ -254,7 +254,7 @@ class ViewerControls:
             sizing_mode="stretch_width",
         )
         self.baseline_start = pn.widgets.FloatInput(
-            name="Start (s)",
+            label="Start (s)",
             value=reference_default[0],
             start=0.0,
             end=self.info.span_s,
@@ -262,7 +262,7 @@ class ViewerControls:
             sizing_mode="stretch_width",
         )
         self.baseline_end = pn.widgets.FloatInput(
-            name="End (s)",
+            label="End (s)",
             value=reference_default[1],
             start=0.0,
             end=self.info.span_s,
@@ -270,7 +270,7 @@ class ViewerControls:
             sizing_mode="stretch_width",
         )
         self.baseline_full_range_button = pn.widgets.Button(
-            name="Use full run as zero",
+            label="Use full run as zero",
             button_type="default",
             icon="arrows-maximize",
             sizing_mode="stretch_width",
@@ -278,7 +278,7 @@ class ViewerControls:
         self.baseline_full_range_button.on_click(self.set_full_reference_range)
 
         self.mark_range = pn.widgets.RangeSlider(
-            name="Mark window (s)",
+            label="Mark window (s)",
             start=0.0,
             end=self.info.span_s,
             value=current_default,
@@ -287,7 +287,7 @@ class ViewerControls:
             sizing_mode="stretch_width",
         )
         self.mark_start = pn.widgets.FloatInput(
-            name="Start (s)",
+            label="Start (s)",
             value=current_default[0],
             start=0.0,
             end=self.info.span_s,
@@ -295,7 +295,7 @@ class ViewerControls:
             sizing_mode="stretch_width",
         )
         self.mark_end = pn.widgets.FloatInput(
-            name="End (s)",
+            label="End (s)",
             value=current_default[1],
             start=0.0,
             end=self.info.span_s,
@@ -303,7 +303,7 @@ class ViewerControls:
             sizing_mode="stretch_width",
         )
         self.mark_full_range_button = pn.widgets.Button(
-            name="Use full run",
+            label="Use full run",
             button_type="default",
             icon="arrows-maximize",
             sizing_mode="stretch_width",
@@ -329,7 +329,7 @@ class ViewerControls:
         self.range_status = pn.pane.Alert("", alert_type="warning", visible=False, sizing_mode="stretch_width")
 
         self.brush_mode = pn.widgets.RadioButtonGroup(
-            name="Draw on plot",
+            label="Draw on plot",
             options={"Analysis range": "current", "Reference range": "reference", "Mark range": "mark"},
             value="current",
             button_type="default",
@@ -351,7 +351,7 @@ class ViewerControls:
         if x_value not in x_options.values():
             x_value = "time"
         self.x_axis_select = pn.widgets.Select(
-            name="",
+            label="",
             options=x_options,
             value=x_value,
             sizing_mode="stretch_width",
@@ -365,7 +365,7 @@ class ViewerControls:
         if q_value not in q_options.values():
             q_value = next(iter(q_options.values()))
         self.quantity_select = pn.widgets.Select(
-            name="",
+            label="",
             options=q_options,
             value=q_value,
             sizing_mode="stretch_width",
@@ -376,7 +376,7 @@ class ViewerControls:
         if qr_value != "__none__" and qr_value not in q_options.values():
             qr_value = "__none__"
         self.quantity_select_right = pn.widgets.Select(
-            name="",
+            label="",
             options={"None (single axis)": "__none__", **q_options},
             value=qr_value,
             sizing_mode="stretch_width",
@@ -385,13 +385,13 @@ class ViewerControls:
         # NB: Panel's Checkbox has no `description`/tooltip, so the labels carry the
         # meaning ("y = 0 line" rather than the cryptic "Zero line").
         self.show_phases = pn.widgets.Checkbox(
-            name="Show phases", value=bool(self.saved.get("show_phases", True)),
+            label="Show phases", value=bool(self.saved.get("show_phases", True)),
         )
         self.zero_line = pn.widgets.Checkbox(
-            name="y = 0 line", value=bool(self.saved.get("zero_line", False)),
+            label="y = 0 line", value=bool(self.saved.get("zero_line", False)),
         )
         self.show_cycles = pn.widgets.Checkbox(
-            name="Show cycles", value=bool(self.saved.get("show_cycles", False)),
+            label="Show cycles", value=bool(self.saved.get("show_cycles", False)),
         )
         # A second Y-axis only makes sense as a vs-time comparison of two distinct
         # signals: disable it on cross-plots (vs potential/charge/cycle) and never
@@ -402,7 +402,7 @@ class ViewerControls:
         self._apply_right_axis_enabled()
 
         self.sequence = pn.widgets.IntSlider(
-            name="Sweep number",
+            label="Sweep number",
             start=self.info.seq_min,
             end=max(self.info.seq_max, self.info.seq_min),
             value=int(self.saved.get("sequence", self.info.seq_min)),
@@ -410,13 +410,13 @@ class ViewerControls:
             sizing_mode="stretch_width",
         )
         self.previous_sweep_button = pn.widgets.Button(
-            name="Previous",
+            label="Previous",
             button_type="default",
             icon="chevron-left",
             sizing_mode="stretch_width",
         )
         self.next_sweep_button = pn.widgets.Button(
-            name="Next",
+            label="Next",
             button_type="default",
             icon="chevron-right",
             sizing_mode="stretch_width",
@@ -425,7 +425,7 @@ class ViewerControls:
         self.next_sweep_button.on_click(self.next_sweep)
 
         self.sweep_mode = pn.widgets.RadioButtonGroup(
-            name="Show",
+            label="Show",
             options={
                 "Selected channels": "selected overtones",
                 "One channel": "single group",
@@ -435,13 +435,13 @@ class ViewerControls:
             sizing_mode="stretch_width",
         )
         self.group_for_single = pn.widgets.Select(
-            name="Single channel",
+            label="Single channel",
             options=group_options,
             value=str(self.saved.get("single_group", self.info.groups[0])),
             sizing_mode="stretch_width",
         )
         self.frequency_band = pn.widgets.EditableRangeSlider(
-            name="Waterfall frequency band (Hz)",
+            label="Waterfall frequency band (Hz)",
             start=self.info.fmin,
             end=self.info.fmax,
             value=tuple(self.saved.get("frequency_band", [self.info.fmin, self.info.fmax])),
@@ -451,20 +451,20 @@ class ViewerControls:
         )
 
         self.orders_text = pn.widgets.TextInput(
-            name="Overtone orders",
+            label="Overtone orders",
             value=self.saved.get("orders_text", default_orders),
             placeholder="g0:n=1, g1:n=3, g2:n=5",
             sizing_mode="stretch_width",
         )
 
         self.region_type = pn.widgets.Select(
-            name="Phase type",
+            label="Phase type",
             options=_REGION_TYPES,
             value="phase",
             sizing_mode="stretch_width",
         )
         self.region_label = pn.widgets.TextInput(
-            name="Phase / event name",
+            label="Phase / event name",
             placeholder="baseline / rinse / sample added",
             sizing_mode="stretch_width",
         )
@@ -473,25 +473,25 @@ class ViewerControls:
         self.marker_label = self.region_label
 
         self.mark_point_button = pn.widgets.Button(
-            name="Mark event",
+            label="Mark event",
             button_type="default",
             icon="map-pin",
             sizing_mode="stretch_width",
         )
         self.mark_window_button = pn.widgets.Button(
-            name="Save phase",
+            label="Save phase",
             button_type="primary",
             icon="brackets-contain",
             sizing_mode="stretch_width",
         )
         self.marker_select = pn.widgets.Select(
-            name="Report/export region",
+            label="Report/export region",
             options={"Current range": "__current__"},
             value="__current__",
             sizing_mode="stretch_width",
         )
         self.analysis_region_select = pn.widgets.Select(
-            name="Analysis target",
+            label="Analysis target",
             options={"Current range": "__current__"},
             value="__current__",
             sizing_mode="stretch_width",
@@ -499,20 +499,20 @@ class ViewerControls:
         )
 
         self.use_selection_as_baseline = pn.widgets.Button(
-            name="Set reference = current range",
+            label="Set reference = current range",
             button_type="primary",
             icon="anchor",
             sizing_mode="stretch_width",
         )
         self.revert_baseline = pn.widgets.Button(
-            name="Undo zero change",
+            label="Undo zero change",
             button_type="default",
             icon="history",
             disabled=True,
             sizing_mode="stretch_width",
         )
         self.save_state_button = pn.widgets.Button(
-            name="Save view",
+            label="Save view",
             button_type="default",
             icon="device-floppy",
             description="Save the current selections, axes, and ranges to this run "
@@ -641,19 +641,19 @@ class ViewerControls:
         """Editable per-run experiment parameters, seeded from saved state."""
         p = ExperimentParams.from_dict(self.saved.get("params"))
         self.param_area = pn.widgets.FloatInput(
-            name="Electrode area (cm²)", value=p.area_cm2, start=AREA_MIN_CM2, step=0.01,
+            label="Electrode area (cm²)", value=p.area_cm2, start=AREA_MIN_CM2, step=0.01,
             sizing_mode="stretch_width",
         )
         self.param_sensitivity = pn.widgets.FloatInput(
-            name="Sauerbrey sensitivity (ng·cm⁻²·Hz⁻¹)", value=p.sensitivity, start=AREA_MIN_CM2,
+            label="Sauerbrey sensitivity (ng·cm⁻²·Hz⁻¹)", value=p.sensitivity, start=AREA_MIN_CM2,
             step=0.1, sizing_mode="stretch_width",
         )
         self.param_molar_mass = pn.widgets.FloatInput(
-            name="Molar mass M (g/mol)", value=p.molar_mass, start=AREA_MIN_CM2, step=0.01,
+            label="Molar mass M (g/mol)", value=p.molar_mass, start=AREA_MIN_CM2, step=0.01,
             sizing_mode="stretch_width",
         )
         self.param_valency = pn.widgets.IntInput(
-            name="Valency z", value=p.valency, start=1, step=1, sizing_mode="stretch_width",
+            label="Valency z", value=p.valency, start=1, step=1, sizing_mode="stretch_width",
         )
 
     def params(self) -> ExperimentParams:
@@ -696,31 +696,31 @@ class ViewerControls:
         """Display controls scoped to the mass-per-electron (MPE) quantity."""
         s = self.saved
         self.mpe_smooth = pn.widgets.Checkbox(
-            name="Savitzky–Golay smoothing", value=bool(s.get("mpe_smooth", False)),
+            label="Savitzky–Golay smoothing", value=bool(s.get("mpe_smooth", False)),
         )
         self.mpe_window = pn.widgets.IntInput(
-            name="Smoothing window", value=int(s.get("mpe_window", MPE_SMOOTH_WINDOW_DEFAULT)),
+            label="Smoothing window", value=int(s.get("mpe_window", MPE_SMOOTH_WINDOW_DEFAULT)),
             start=5, step=2, sizing_mode="stretch_width",
         )
         self.mpe_clip = pn.widgets.Checkbox(
-            name="Clip outliers", value=bool(s.get("mpe_clip", True)),
+            label="Clip outliers", value=bool(s.get("mpe_clip", True)),
         )
         self.mpe_clip_lo = pn.widgets.FloatInput(
-            name="Clip min (g/mol)", value=float(s.get("mpe_clip_lo", MPE_CLIP_LO_DEFAULT)), step=10.0,
+            label="Clip min (g/mol)", value=float(s.get("mpe_clip_lo", MPE_CLIP_LO_DEFAULT)), step=10.0,
             sizing_mode="stretch_width",
         )
         self.mpe_clip_hi = pn.widgets.FloatInput(
-            name="Clip max (g/mol)", value=float(s.get("mpe_clip_hi", MPE_CLIP_HI_DEFAULT)), step=10.0,
+            label="Clip max (g/mol)", value=float(s.get("mpe_clip_hi", MPE_CLIP_HI_DEFAULT)), step=10.0,
             sizing_mode="stretch_width",
         )
         self.mpe_target_show = pn.widgets.Checkbox(
-            name="Show target line (M / z)", value=bool(s.get("mpe_target_show", True)),
+            label="Show target line (M / z)", value=bool(s.get("mpe_target_show", True)),
         )
         self.despike = pn.widgets.Checkbox(
-            name="Despike (Hampel)", value=bool(s.get("despike", False)),
+            label="Despike (Hampel)", value=bool(s.get("despike", False)),
         )
         self.despike_window = pn.widgets.IntInput(
-            name="Despike window", value=int(s.get("despike_window", DESPIKE_WINDOW_DEFAULT)),
+            label="Despike window", value=int(s.get("despike_window", DESPIKE_WINDOW_DEFAULT)),
             start=3, step=2, sizing_mode="stretch_width",
         )
 
@@ -932,7 +932,7 @@ class ViewerControls:
     def plot_reset_button(self, name: str = "Reset plot scale"):
         """Return a fresh reset button so the same widget is not mounted twice."""
         button = pn.widgets.Button(
-            name=name,
+            label=name,
             button_type="default",
             icon="refresh",
             sizing_mode="stretch_width",

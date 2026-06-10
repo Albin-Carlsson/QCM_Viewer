@@ -235,7 +235,7 @@ class ViewerShell:
         # The directory browser is ~600px wide and would blow out the fixed
         # sidebar, so the sidebar only carries a compact button; the browser
         # itself lives in a modal (built once, mounted at the app root).
-        open_btn = pn.widgets.Button(name="Add run", icon="plus", button_type="default",
+        open_btn = pn.widgets.Button(label="Add run", icon="plus", button_type="default",
                                      sizing_mode="stretch_width", css_classes=["qcm-add-run-btn"])
         open_btn.on_click(lambda _e: self._open_add_run_modal())
         return open_btn
@@ -287,11 +287,11 @@ class ViewerShell:
             directory=root, margin=0, sizing_mode="stretch_width", css_classes=["qcm-run-browser"],
         )
         self._profile_override = pn.widgets.Select(
-            name="Profile", options=self._OVERRIDE_OPTIONS, value="auto", sizing_mode="stretch_width",
+            label="Profile", options=self._OVERRIDE_OPTIONS, value="auto", sizing_mode="stretch_width",
         )
         # Holds one Select per file column while the mapping editor is shown.
         self._col_role_selects: dict[str, pn.widgets.Select] = {}
-        add = pn.widgets.Button(name="Import & add", icon="plus", button_type="primary")
+        add = pn.widgets.Button(label="Import & add", icon="plus", button_type="primary")
         add.on_click(lambda _e: self._confirm_add_run())
         detected = pn.bind(self._detected_profile_html, self._run_browser.param.value,
                            self._profile_override)
@@ -445,7 +445,7 @@ class ViewerShell:
             active = nav.clamp_mode(int(active))
             items = []
             for i, mode in enumerate(nav.MODES):
-                btn = pn.widgets.Button(name=mode.label, icon=mode.icon,
+                btn = pn.widgets.Button(label=mode.label, icon=mode.icon,
                                         button_type="default", sizing_mode="stretch_width")
                 btn.on_click(self._go(i))
                 classes = ["qcm-nav-item"] + (["is-active"] if i == active else [])
@@ -455,7 +455,7 @@ class ViewerShell:
         return pn.bind(render, self.mode)
 
     def _build_sidebar(self):
-        help_btn = pn.widgets.Button(name="Help & shortcuts", icon="help", button_type="default",
+        help_btn = pn.widgets.Button(label="Help & shortcuts", icon="help", button_type="default",
                                      sizing_mode="stretch_width")
         help_btn.on_click(lambda _e: self.actions.notify(
             "Drag on the plot to set the active range · click a point to load that sweep · "
@@ -478,12 +478,12 @@ class ViewerShell:
             "</div>",
             margin=0, sizing_mode="stretch_width",
         )
-        export_btn = pn.widgets.Button(name="Export", icon="download", button_type="primary",
+        export_btn = pn.widgets.Button(label="Export", icon="download", button_type="primary",
                                        description="Build a shareable report and data export from the current view.",
                                        stylesheets=[ACCENT_BUTTON_STYLESHEET],
                                        sizing_mode="fixed")
         export_btn.on_click(self._go(nav.mode_index("report")))
-        inspect = pn.widgets.Button(name="Inspect raw sweeps", icon="microscope", button_type="default",
+        inspect = pn.widgets.Button(label="Inspect raw sweeps", icon="microscope", button_type="default",
                                     description="Open the raw resonance sweeps and I/Q traces for QC.",
                                     sizing_mode="fixed")
         inspect.on_click(self._open_drawer)
@@ -615,7 +615,7 @@ class ViewerShell:
 
     # =====================================================  drawer
     def _build_drawer(self):
-        close = pn.widgets.Button(name="Close", icon="x", button_type="default")
+        close = pn.widgets.Button(label="Close", icon="x", button_type="default")
         close.on_click(self._close_drawer)
         qc_content = pn.bind(lambda _open: self._qc.view() if _open else pn.Spacer(height=0),
                              self.drawer_open)
@@ -628,7 +628,7 @@ class ViewerShell:
         )
         self.drawer_open.link(panel, value="visible")
         # A click-anywhere backdrop that dims the page and closes the drawer.
-        scrim = pn.widgets.Button(name="", css_classes=["qcm-scrim"], visible=False)
+        scrim = pn.widgets.Button(label="", css_classes=["qcm-scrim"], visible=False)
         scrim.on_click(self._close_drawer)
         self.drawer_open.link(scrim, value="visible")
         return pn.Column(scrim, panel, margin=0, css_classes=["qcm-drawer-layer"])
