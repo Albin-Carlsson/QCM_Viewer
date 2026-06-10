@@ -270,6 +270,53 @@ def despike(
     return out.group_by("group", maintain_order=True).map_groups(_despike_group)
 
 
+def sauerbrey_check(summary: pl.DataFrame) -> dict | None:
+    """Judge whether Sauerbrey mass is trustworthy over the analysed region.
+
+    Reads a :func:`region_overtone_summary` frame and reports the two standard
+    sanity checks:
+
+    - **overtone spread** — Δf/n should collapse across overtones for a rigid
+      film; the spread is ``(max − min) / |mean|`` of the per-group means, in %;
+    - **viscoelastic ratio** — mean ΔD/(−Δf/n); above ~0.4 ×10⁻⁶/Hz the film
+      is soft and Sauerbrey underestimates the mass.
+
+    Returns ``{"spread_pct", "ratio", "verdict", "detail"}`` with verdict one of
+    ``"ok" | "caution" | "poor"``, or ``None`` when the region carries no usable
+    Δf/n signal (e.g. an empty range or a pure-echem run).
+    """
+    if summary is None or summary.is_empty() or "df_n" not in summary.columns:
+        return None
+    df_n = summary["df_n"].drop_nulls()
+    if df_n.len() == 0:
+        return None
+    mean_df = float(df_n.mean())
+    if abs(mean_df) <= FREQ_EPS_HZ:
+        return None
+
+    spread_pct = None
+    if df_n.len() >= 2:
+        spread_pct = 100.0 * (float(df_n.max()) - float(df_n.min())) / abs(mean_df)
+
+    ratio = None
+    if "dD_per_df" in summary.columns:
+        r = summary["dD_per_df"].drop_nulls()
+        if r.len():
+            ratio = abs(float(r.mean()))
+
+    from .theme import SAUERBREY_RATIO_MAX, SAUERBREY_SPREAD_MAX_PCT
+
+    soft = ratio is not None and ratio > SAUERBREY_RATIO_MAX
+    scattered = spread_pct is not None and spread_pct > SAUERBREY_SPREAD_MAX_PCT
+    if soft:
+        verdict, detail = "poor", "viscoelastic film — Sauerbrey underestimates mass"
+    elif scattered:
+        verdict, detail = "caution", "overtones disagree — check n or film homogeneity"
+    else:
+        verdict, detail = "ok", "rigid-film assumptions hold"
+    return {"spread_pct": spread_pct, "ratio": ratio, "verdict": verdict, "detail": detail}
+
+
 def summary_stats(value_df: pl.DataFrame) -> pl.DataFrame:
     """Comprehensive per-group statistics for a computed value frame.
 

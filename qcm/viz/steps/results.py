@@ -166,6 +166,26 @@ class ResultsStep(BaseStep):
                     out[name] = None
         return out
 
+    def _sauerbrey_cell(self, state) -> str | None:
+        """Validity tile: overtone collapse + viscoelastic ratio over the range."""
+        try:
+            from .. import science
+
+            check = science.sauerbrey_check(self.data.region_summary(state))
+        except Exception:
+            return None
+        if check is None:
+            return None
+        tone = {"ok": "success", "caution": "warning", "poor": "danger"}[check["verdict"]]
+        label = {"ok": "Valid", "caution": "Caution", "poor": "Doubtful"}[check["verdict"]]
+        bits = []
+        if check["ratio"] is not None:
+            bits.append(f"ΔD/−Δf {check['ratio']:.2f} ×10⁻⁶/Hz")
+        if check["spread_pct"] is not None:
+            bits.append(f"overtone spread {check['spread_pct']:.0f}%")
+        return icon_stat("Sauerbrey check", label, icon="ratio", tone=tone,
+                         caption=" · ".join(bits) or check["detail"])
+
     # --- headline cards ----------------------------------------------------
     def summary_cards(self):
         try:
@@ -176,6 +196,9 @@ class ResultsStep(BaseStep):
                 icon_stat("Mean ΔD", self._fmt(m.get("dD"), 3, " ×10⁻⁶"), icon="dissipation"),
                 icon_stat("Mass (Sauerbrey)", self._fmt(m.get("mass"), 1, " ng/cm²"), icon="mass"),
             ]
+            validity = self._sauerbrey_cell(state)
+            if validity is not None:
+                cells.append(validity)
             if self.data.has_echem():
                 charge = m.get("charge")
                 jdens = m.get("jdens")

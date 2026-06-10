@@ -82,6 +82,12 @@ MPE_SAVGOL_POLYORDER = 2
 # bubbles, brief fit glitches). Threshold is in robust sigmas (MAD-scaled).
 DESPIKE_WINDOW_DEFAULT = 7
 DESPIKE_THRESHOLD_SIGMA = 5.0
+# Sauerbrey validity rules of thumb. The film counts as rigid when
+# ΔD/(−Δf/n) ≲ 4×10⁻⁷ Hz⁻¹ (Reviakine et al., Anal. Chem. 2011) — 0.4 in the
+# viewer's ×10⁻⁶-per-Hz units — and the overtones should tell the same story:
+# Δf/n collapsing within ~10 % across n.
+SAUERBREY_RATIO_MAX = 0.4       # ΔD[×10⁻⁶] per Hz of −Δf/n
+SAUERBREY_SPREAD_MAX_PCT = 10.0  # max overtone spread of Δf/n, % of |mean|
 
 
 def area_to_diameter_mm(area_cm2: float) -> float:
