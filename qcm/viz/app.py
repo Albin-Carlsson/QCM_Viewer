@@ -87,12 +87,34 @@ def _is_run_dir(path: str | Path) -> bool:
     return p.is_dir() and (p / "manifest.json").exists()
 
 
+# Hand-off from the landing page to the next page load. Swapping the whole
+# workbench into a live document (`root.objects = [viewer]`) wedges Bokeh's
+# layout pass in the browser for real-sized runs, so the landing page instead
+# records what to open here and triggers a browser reload; the fresh document
+# then renders the workbench as the initial payload — the same (fast, proven)
+# path as serving with run arguments. "resume" means rebuild from the saved
+# session; a list means open those run dirs.
+_PENDING_OPEN: list[str] | str | None = None
+
+
+def _set_pending(value: list[str] | str) -> None:
+    global _PENDING_OPEN
+    _PENDING_OPEN = value
+
+
+def _consume_pending() -> list[str] | str | None:
+    global _PENDING_OPEN
+    value, _PENDING_OPEN = _PENDING_OPEN, None
+    return value
+
+
 def _landing():
     """Friendly empty state: pick a run folder or instrument file, then open it.
 
     Shown when the viewer is served with no (valid) run, so a non-technical user
-    sees a file picker instead of a stack trace. Imports the chosen source in
-    place and swaps the page to the live viewer on success.
+    sees a file picker instead of a stack trace. Opening records the choice in
+    ``_PENDING_OPEN`` and reloads the page; the next document render then builds
+    the workbench as its initial payload (see the note on ``_PENDING_OPEN``).
     """
     import tempfile
 
@@ -136,10 +158,9 @@ def _landing():
             except Exception as exc:  # noqa: BLE001
                 _set("danger", f"Could not open {src.name}: {exc}")
                 return
-        try:
-            root.objects = [QCMViewer(run_dirs).view()]
-        except Exception as exc:  # noqa: BLE001
-            _set("danger", f"Failed to load: {exc}")
+        _set_pending([str(p) for p in run_dirs])
+        _set("success", "Opening …")
+        pn.state.location.reload = True
 
     open_btn.on_click(_open)
 
@@ -155,11 +176,9 @@ def _landing():
         )
 
         def _resume(_event=None):
-            rs = load_session()
-            if rs is None:
-                _set("warning", "The previous session could not be loaded.")
-                return
-            root.objects = [QCMViewer(runset=rs).view()]
+            _set_pending("resume")
+            _set("success", "Resuming last session …")
+            pn.state.location.reload = True
 
         resume_btn.on_click(_resume)
         resume_row = [pn.Row(resume_btn, margin=(0, 0, 12, 0))]
@@ -179,6 +198,17 @@ def _landing():
 
 
 def app(run_path: str | list[str] | None = None):
+    pending = _consume_pending()
+    if pending == "resume":
+        from .runset import load_session
+
+        rs = load_session()
+        if rs is not None:
+            return QCMViewer(runset=rs).view()
+    elif pending:
+        valid = [p for p in pending if _is_run_dir(p)]
+        if valid:
+            return QCMViewer(valid).view()
     if run_path is None:
         args = sys.argv[1:]
         run_path = args if args else None
