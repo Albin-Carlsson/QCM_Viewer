@@ -410,6 +410,9 @@ class BaseStep:
                         if (q.kind == "mpe" and getattr(state, "mpe_target_show", False))
                         else None),
             )
+            faraday = self._faraday_overlay(state, ax, q)
+            if faraday is not None:
+                plot = plot * faraday
             return self._finish_anchor(plot, ax, q, height, show_legend, label_df=value_df)
         except Exception as exc:  # pragma: no cover
             return pn.pane.Alert(f"Plot failed: {exc}", alert_type="danger")
@@ -429,6 +432,40 @@ class BaseStep:
             if all(int(state.orders.get(g, 1)) == 1 for g in state.groups):
                 notes.append("n=1 (no normalization)")
         return ("  ·  " + " · ".join(notes)) if notes else ""
+
+    def _faraday_overlay(self, state, ax, q):
+        """Faraday's-law predicted trace (100 % CE) for the hero, or ``None``.
+
+        Drawn for Δf/n and Sauerbrey mass on the time axis when the run has a
+        charge channel and the user enabled the overlay in the params card.
+        The gap between this dashed line and the measured curve reads directly
+        as CE loss, side reactions, or viscoelastic error.
+        """
+        try:
+            toggle = getattr(self.controls, "faraday_show", None)
+            if (
+                toggle is None or not bool(toggle.value)
+                or not ax.is_time
+                or q.key not in ("delta_f_norm", "sauerbrey_mass")
+                or not self.data.has_echem()
+            ):
+                return None
+            from .. import science
+
+            wf = self.data.echem_waveform()
+            pred = science.faraday_prediction(
+                wf, q.key, params=state.params,
+                baseline_us=state.baseline_us(self.data.info.t0_us),
+            )
+            if pred.is_empty():
+                return None
+            t = (pred["timestamp"].to_numpy() - self.data.info.t0_us) / 1e6
+            x, y = plots._decimate_xy(t, pred["value"].to_numpy())
+            return hv.Curve((x, y), label="Faraday (100% CE)").opts(
+                color=INK_SOFT, line_dash="dashdot", line_width=2.0,
+            )
+        except Exception:
+            return None
 
     def _anchor_window(self, state, window: str) -> tuple[float, float]:
         """The highlighted span for the hero plot in the active selection mode."""
@@ -455,10 +492,14 @@ class BaseStep:
         if ax.is_time and label_df is not None:
             plot = self.with_phase_labels(plot, label_df, height=height)
         try:
-            plot = plot.opts(hv.opts.Overlay(
+            outer = dict(
                 show_legend=show_legend, legend_position="right",
                 xlabel=ax.axis_label, ylabel=q.axis_label,
-            ))
+            )
+            ylim = self._manual_ylim()
+            if ylim is not None:
+                outer["ylim"] = ylim
+            plot = plot.opts(hv.opts.Overlay(**outer))
         except Exception:
             pass
         sized = self.force_plot_height(plot, height)
@@ -470,6 +511,18 @@ class BaseStep:
             # maps to seconds, which is meaningless off the time axis.
             return self.attach_brush(self.nearest_hover(sized))
         return self.nearest_hover(sized)
+
+    def _manual_ylim(self) -> tuple[float | None, float | None] | None:
+        """User-pinned hero y-window from the toolbar inputs (blank = auto)."""
+        lo_w = getattr(self.controls, "y_min", None)
+        hi_w = getattr(self.controls, "y_max", None)
+        lo = lo_w.value if lo_w is not None else None
+        hi = hi_w.value if hi_w is not None else None
+        if lo is None and hi is None:
+            return None
+        if lo is not None and hi is not None and lo >= hi:
+            return None
+        return (lo, hi)
 
     def _overlay_anchor(self, state, ax, q, full, window: str, height: int, show_legend: bool):
         """Hero plot for a multi-run set: every run overlaid on one quantity.

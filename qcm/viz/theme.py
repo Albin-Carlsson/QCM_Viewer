@@ -89,6 +89,24 @@ MAD_TO_SIGMA = 1.4826
 # offsets are a few seconds; beyond ±30 s the correlation peak is more likely
 # a cycle-period alias than a true offset.
 ALIGNMENT_MAX_LAG_S = 30.0
+# AT-cut quartz properties for deriving the Sauerbrey sensitivity from the
+# crystal's fundamental frequency: C = √(ρq·µq) / (2·f₀²). Values as used in
+# the reference notebook (f₀ = 4.95 MHz ⇒ C ≈ 18.0 ng·cm⁻²·Hz⁻¹; the classic
+# 17.7 default corresponds to f₀ = 5.00 MHz).
+RHO_QUARTZ_G_CM3 = 2.65
+MU_QUARTZ_G_CM_S2 = 2.9471e11
+DEFAULT_CRYSTAL_F0_MHZ = 4.95
+
+
+def sensitivity_from_f0(f0_mhz: float) -> float:
+    """Sauerbrey sensitivity (ng·cm⁻²·Hz⁻¹) from the crystal fundamental (MHz)."""
+    f0_hz = float(f0_mhz) * 1e6
+    if f0_hz <= 0:
+        raise ValueError("crystal fundamental must be positive")
+    g_per_cm2_hz = math.sqrt(RHO_QUARTZ_G_CM3 * MU_QUARTZ_G_CM_S2) / (2.0 * f0_hz**2)
+    return g_per_cm2_hz * 1e9  # g → ng
+
+
 # Most cycles drawn as individual traces in a per-cycle echem plot. A long
 # cycling run ("All" cycles) has hundreds; drawing each is unreadable spaghetti
 # and slow, so an evenly spaced subset (always incl. first/last) represents the

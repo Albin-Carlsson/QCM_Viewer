@@ -964,6 +964,41 @@ def df_fingerprint(norm_df: pl.DataFrame, d_df: pl.DataFrame, groups: list[int],
     )
 
 
+def potential_strip(
+    wf: pl.DataFrame, t0_us: int, *, window: tuple[float, float] | None = None,
+    height: int = 130,
+):
+    """Compact full-run E(t) context band shown above the hero on EQCM runs.
+
+    The notebook's canonical figure reads potential and the QCM response
+    against the same clock; this keeps E(t) permanently in view (with the
+    analysis window highlighted) instead of axis-switched away. It is an
+    overview band, so it always spans the whole run. Returns ``None`` when the
+    waveform has no potential.
+    """
+    if wf is None or wf.is_empty() or "potential" not in wf.columns:
+        return None
+    sub = wf.select(["timestamp", "potential"]).drop_nulls().sort("timestamp")
+    if sub.is_empty():
+        return None
+    t = (sub["timestamp"].to_numpy() - int(t0_us)) / 1e6
+    x, y = _decimate_xy(t, sub["potential"].to_numpy())
+    elements: list = []
+    if window is not None:
+        lo, hi = sorted(float(v) for v in window)
+        elements.append(hv.VSpan(lo, hi).opts(color=BASELINE_COLOR, fill_alpha=0.35))
+    elements.append(
+        hv.Curve((x, y), X_LABEL, "E [V]").opts(color=EVENT_COLOR, line_width=1.1)
+    )
+    return hv.Overlay(elements).opts(
+        hv.opts.Overlay(
+            height=height, responsive=True, show_legend=False, show_grid=True,
+            xlabel="", ylabel="E [V]", toolbar=None,
+            hooks=[_autohide_toolbar_hook],
+        ),
+    )
+
+
 def _thin_cycles(cycles: list[int]) -> tuple[list[int], bool]:
     """Evenly spaced subset (incl. first & last) when there are too many cycles
     to read as individual traces. Returns ``(cycles, was_thinned)``."""

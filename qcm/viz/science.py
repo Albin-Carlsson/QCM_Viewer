@@ -319,6 +319,55 @@ def alignment_lag(df: pl.DataFrame, *, max_lag_s: float = ALIGNMENT_MAX_LAG_S) -
     return {"lag_s": float(lags[best] * dt), "corr": float(corr[best])}
 
 
+def faraday_prediction(
+    wf: pl.DataFrame,
+    quantity_key: str,
+    *,
+    params: ExperimentParams | None = None,
+    baseline_us: tuple[int, int] | None = None,
+) -> pl.DataFrame:
+    """Faraday's-law prediction of the QCM response from the measured charge.
+
+    100 % current efficiency into the target species deposits
+    ``m(t) = −Q(t)·M / (z·F·A)`` g/cm²; via the Sauerbrey sensitivity that is a
+    predicted ``Δf/n = −m/C``. Overlaying this on the measured trace is the
+    notebook's "theoretical Zn" line, generalized: it follows the *measured*
+    current programme (any technique), so deviations read directly as
+    non-faradaic mass, side reactions, or viscoelastic error.
+
+    ``wf`` carries ``[timestamp, charge]``; returns ``[timestamp, value]`` for
+    ``quantity_key`` in ``("sauerbrey_mass", "delta_f_norm")``. When
+    ``baseline_us`` is given the prediction is re-zeroed on that window, the
+    same referencing convention as the measured Δ quantities.
+    """
+    p = params or DEFAULT_PARAMS
+    if (
+        wf is None or wf.is_empty()
+        or not {"timestamp", "charge"}.issubset(wf.columns)
+        or quantity_key not in ("sauerbrey_mass", "delta_f_norm")
+        or p.area_cm2 <= 0 or p.valency <= 0 or p.sensitivity <= 0
+    ):
+        return pl.DataFrame()
+    out = (
+        wf.select(["timestamp", "charge"]).drop_nulls().sort("timestamp")
+        .with_columns(
+            (
+                -pl.col("charge") * p.molar_mass
+                / (p.valency * FARADAY_CONSTANT * p.area_cm2)
+                / NG_PER_CM2_TO_G  # g/cm² → ng/cm²
+            ).alias("value")
+        )
+    )
+    if quantity_key == "delta_f_norm":
+        out = out.with_columns((-pl.col("value") / p.sensitivity).alias("value"))
+    if baseline_us is not None:
+        b0, b1 = baseline_us
+        base = out.filter(pl.col("timestamp").is_between(b0, b1))["value"]
+        if base.len():
+            out = out.with_columns(pl.col("value") - float(base.mean()))
+    return out.select(["timestamp", "value"])
+
+
 def sauerbrey_check(summary: pl.DataFrame) -> dict | None:
     """Judge whether Sauerbrey mass is trustworthy over the analysed region.
 

@@ -21,6 +21,7 @@ from .state import RunInfo, ViewState, parse_orders
 from .theme import (
     AREA_MIN_CM2,
     AXES,
+    DEFAULT_CRYSTAL_F0_MHZ,
     DEFAULT_VISIBLE_OVERTONES,
     DESPIKE_WINDOW_DEFAULT,
     MPE_CLIP_HI_DEFAULT,
@@ -30,6 +31,7 @@ from .theme import (
     ExperimentParams,
     area_to_diameter_mm,
     quantity,
+    sensitivity_from_f0,
 )
 
 _QUANTITY_OPTIONS = {q.label: key for key, q in QUANTITIES.items()}
@@ -415,6 +417,28 @@ class ViewerControls:
         self.show_cycles = pn.widgets.Checkbox(
             label="Show cycles", value=bool(self.saved.get("show_cycles", False)),
         )
+        # Compact full-run E(t) context strip above the hero (EQCM runs): the
+        # notebook's canonical figure reads potential and Δf/ΔD against the same
+        # clock, so the potential is kept in view instead of axis-switched away.
+        self.show_potential = pn.widgets.Checkbox(
+            label="E(t) panel", value=bool(self.saved.get("show_potential", True)),
+        )
+        # Manual hero y-window (blank = autoscale). Bokeh zoom covers ad-hoc
+        # inspection; these pin a reproducible window for comparisons/reports.
+        def _opt_float(v):
+            try:
+                return None if v is None else float(v)
+            except (TypeError, ValueError):
+                return None
+
+        self.y_min = pn.widgets.FloatInput(
+            label="Y min", value=_opt_float(self.saved.get("y_lo")), placeholder="auto",
+            sizing_mode="stretch_width", css_classes=["compact-num"],
+        )
+        self.y_max = pn.widgets.FloatInput(
+            label="Y max", value=_opt_float(self.saved.get("y_hi")), placeholder="auto",
+            sizing_mode="stretch_width", css_classes=["compact-num"],
+        )
         # A second Y-axis only makes sense as a vs-time comparison of two distinct
         # signals: disable it on cross-plots (vs potential/charge/cycle) and never
         # let the right axis duplicate the left.
@@ -573,6 +597,8 @@ class ViewerControls:
             self.baseline_range.param.value_throttled,
             self.annotation_version,
             self.analysis_region_select,
+            self.y_min,
+            self.y_max,
         )
 
     @property
@@ -681,6 +707,30 @@ class ViewerControls:
         self.param_valency = pn.widgets.IntInput(
             label="Valency z", value=p.valency, start=1, step=1, sizing_mode="stretch_width",
         )
+        # Faraday's-law predicted Δf/n / mass overlay (needs a charge channel).
+        self.faraday_show = pn.widgets.Checkbox(
+            label="Faraday prediction overlay",
+            value=bool(self.saved.get("faraday_show", False)),
+        )
+        # Derive the sensitivity from the crystal fundamental instead of typing
+        # it: C = √(ρq·µq)/(2f₀²) — the reference notebook's convention.
+        self.param_f0 = pn.widgets.FloatInput(
+            label="Crystal f₀ (MHz)", value=DEFAULT_CRYSTAL_F0_MHZ, start=0.1, step=0.05,
+            sizing_mode="stretch_width",
+        )
+        self.param_f0_apply = pn.widgets.Button(
+            label="Set sensitivity from f₀", button_type="default", icon="calculator",
+            sizing_mode="stretch_width",
+        )
+        self.param_f0_apply.on_click(self._apply_sensitivity_from_f0)
+
+    def _apply_sensitivity_from_f0(self, _event=None) -> None:
+        try:
+            self.param_sensitivity.value = round(
+                sensitivity_from_f0(self._safe_float(self.param_f0.value, 0.0)), 3
+            )
+        except ValueError:
+            pass
 
     def params(self) -> ExperimentParams:
         d = ExperimentParams()
@@ -693,7 +743,8 @@ class ViewerControls:
 
     @property
     def param_inputs(self) -> tuple:
-        return (self.param_area, self.param_sensitivity, self.param_molar_mass, self.param_valency)
+        return (self.param_area, self.param_sensitivity, self.param_molar_mass,
+                self.param_valency, self.faraday_show)
 
     def experiment_params_panel(self) -> pn.viewable.Viewable:
         """Editable parameter card with a live Target-MPE (= M/z) readout."""
@@ -710,8 +761,12 @@ class ViewerControls:
             )
         return pn.Card(
             self.param_area, pn.bind(geom, self.param_area),
-            self.param_sensitivity, self.param_molar_mass, self.param_valency,
+            self.param_sensitivity,
+            pn.Row(self.param_f0, self.param_f0_apply, margin=0,
+                   css_classes=["param-f0-row"]),
+            self.param_molar_mass, self.param_valency,
             pn.bind(target, *self.param_inputs),
+            self.faraday_show,
             title="Experiment parameters",
             collapsible=True, collapsed=True, margin=0, sizing_mode="stretch_width",
             css_classes=["experiment-params"],
@@ -1276,20 +1331,28 @@ class ViewerControls:
             margin=0, sizing_mode="stretch_width", css_classes=classes,
         )
 
-    def data_toolbar(self, include_cycles: bool = False):
+    def data_toolbar(self, include_cycles: bool = False, include_potential: bool = False):
         """Horizontal control strip shown above the hero plot on the Data page."""
         toggle_items = [self.show_phases, self.zero_line]
         if include_cycles:
             toggle_items.append(self.show_cycles)
+        if include_potential:
+            toggle_items.append(self.show_potential)
         toggles = pn.Column(
             pn.pane.HTML("<div class='eyebrow'>Display</div>", margin=0),
             pn.Row(*toggle_items, margin=0, css_classes=["qcm-tooltoggles"]),
             margin=0, css_classes=["qcm-toolcell", "qcm-toolcell-display"],
         )
+        ylims = pn.Column(
+            pn.pane.HTML("<div class='eyebrow'>Y window</div>", margin=0),
+            pn.Row(self.y_min, self.y_max, margin=0, css_classes=["qcm-ylim-inputs"]),
+            margin=0, css_classes=["qcm-toolcell", "qcm-toolcell-ylim"],
+        )
         return pn.Row(
             self._toolcell("X-axis", self.x_axis_select),
             self._toolcell("Y-axis (left)", self.quantity_select, grow=True),
             self._toolcell("Y-axis (right)", self.quantity_select_right, grow=True),
+            ylims,
             toggles,
             margin=0, sizing_mode="stretch_width", css_classes=["qcm-toolbar2"],
         )

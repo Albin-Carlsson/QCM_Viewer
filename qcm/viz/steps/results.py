@@ -784,10 +784,17 @@ class ResultsStep(BaseStep):
         CP (galvanostatic): mass-vs-charge (capacity) + the voltage profile —
         the current-density-vs-potential plot is dropped because constant current
         and a flat potential make it meaningless there.
+
+        These plots always show the *active* run only (by design — the locked
+        multi-run decision keeps mass-detail plots single-run); the card title
+        says so whenever neighbouring cards overlay every run.
         """
+        # Mark single-run cards so they aren't misread as overlays in a
+        # multi-run workspace.
+        badge = " · active run" if self._is_multi() else ""
         if self._technique() == "cp":
             left = self._results_card(self.mass_vs_potential(height=PLOT_HEIGHT),
-                                      "Mass vs charge (capacity)")
+                                      f"Mass vs charge (capacity){badge}")
             right = self._results_card(self.potential_vs_capacity(height=PLOT_HEIGHT),
                                        "Voltage profile (potential vs charge)")
         else:
@@ -796,9 +803,9 @@ class ResultsStep(BaseStep):
             # is the area-scaled headline and is reachable on the Data page, so it
             # isn't restated here.
             left = self._results_card(self.mass_vs_potential(height=PLOT_HEIGHT),
-                                      "Mass vs potential")
+                                      f"Mass vs potential{badge}")
             right = self._results_card(self.mass_vs_charge(height=PLOT_HEIGHT),
-                                       "Mass vs charge (slope = M/z)")
+                                       f"Mass vs charge (slope = M/z){badge}")
         return pn.Row(left, right, margin=0, sizing_mode="stretch_width",
                       css_classes=["qcm-results-plotrow"])
 
@@ -876,7 +883,8 @@ class ResultsStep(BaseStep):
             self.panel(lambda: self.cycle_overlay_plot(), *sig, *cyc, rv, self.controls.plot_reset_version,
                        title="Cycle overlay", controls=pn.Row(self.cycle_zero, margin=0)),
             self.panel(lambda: self.alignment_check(), *sig, rv,
-                       title="PS ↔ QCM alignment check", collapsible=True, collapsed=True),
+                       title="PS ↔ QCM alignment check" + (" · active run" if self._is_multi() else ""),
+                       collapsible=True, collapsed=True),
             self.panel(self.per_cycle_table, *sig, *cyc, rv, title="Per-cycle summary",
                        controls=pn.Row(self.csv_download(self._per_cycle_frame, "per_cycle_summary.csv"),
                                        margin=0), controls_position="bottom"),

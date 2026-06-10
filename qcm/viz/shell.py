@@ -503,7 +503,12 @@ class ViewerShell:
     def _data_hero(self):
         def render(mode_val, *_):
             window = mode_val if mode_val in ("current", "reference", "mark") else "current"
-            return self._data_plot.unified_anchor(window=window, height=HERO_HEIGHT)
+            hero = self._data_plot.unified_anchor(window=window, height=HERO_HEIGHT)
+            strip = self._potential_strip()
+            if strip is None:
+                return hero
+            return pn.Column(strip, hero, margin=0, sizing_mode="stretch_width",
+                             css_classes=["qcm-hero-stack"])
         body = pn.bind(
             render,
             self.controls.brush_mode,
@@ -512,6 +517,7 @@ class ViewerShell:
             self.controls.show_phases,
             self.controls.zero_line,
             self.controls.show_cycles,
+            self.controls.show_potential,
             self.controls.mark_range.param.value_throttled,
             self.controls.mark_start,
             self.controls.mark_end,
@@ -526,6 +532,23 @@ class ViewerShell:
             self.controls.plot_range_slider(),
             hide_header=True, margin=0, sizing_mode="stretch_width", css_classes=["qcm-anchor"],
         )
+
+    def _potential_strip(self):
+        """Full-run E(t) context band for EQCM runs (the notebook reads potential
+        and the QCM response on the same clock). None = not applicable/off."""
+        try:
+            if not self.data.has_echem() or not bool(self.controls.show_potential.value):
+                return None
+            state = self.controls.state()
+            from .theme import axis as _axis
+            if not _axis(state.x_axis).is_time or state.quantity == "potential":
+                return None
+            from . import plots as _plots
+            return _plots.potential_strip(
+                self.data.echem_waveform(), self.info.t0_us, window=state.t_range_s,
+            )
+        except Exception:
+            return None
 
     def _rail_signals(self):
         return self.controls.overtone_controls()
@@ -600,7 +623,8 @@ class ViewerShell:
         # The plot-settings strip rides directly under the topbar as a secondary
         # header spanning the full content width (plot + rail).
         return pn.Column(
-            self.controls.data_toolbar(include_cycles=has_cycles),
+            self.controls.data_toolbar(include_cycles=has_cycles,
+                                       include_potential=self.data.has_echem()),
             body,
             margin=0, sizing_mode="stretch_width", css_classes=["qcm-page-data"],
         )
