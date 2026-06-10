@@ -25,6 +25,7 @@ from pathlib import Path
 from ..ingest import ingest
 from .pstrace_csv import attach_echem, is_pstrace_csv, read_pstrace_csv
 from .pstrace_cv_csv import (
+    DEFAULT_CV_SCAN_RATE,
     attach_cv_echem,
     is_cv_pstrace_csv,
     read_cv_pstrace_csv,
@@ -76,6 +77,72 @@ def detect_profile(source: str | Path) -> str | None:
         except Exception:
             continue
     return None
+
+
+def _candidate_files(folder: Path) -> list[Path]:
+    """Importable files directly inside a folder (csv/txt/parquet), sorted."""
+    exts = {".csv", ".txt", ".parquet"}
+    return sorted(p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in exts)
+
+
+# When a folder holds the same QCM run in several formats, prefer in this order
+# (lower = preferred): an already-built parquet, the Qsoft .txt, the CSV export.
+_QCM_EXT_PRIORITY = {".parquet": 0, ".txt": 1, ".csv": 2}
+
+
+def _pick_ps(qcm_stem: str, ps: list[Path]) -> Path | None:
+    """Choose the potentiostat file most likely paired with the QCM source."""
+    if not ps:
+        return None
+    # Prefer one whose name shares the QCM stem (e.g. mp_cycling → mp_cycling_PS).
+    shared = [p for p in ps if p.stem.lower().startswith(qcm_stem.lower())]
+    return (shared or ps)[0]
+
+
+def resolve_import_target(path: str | Path) -> tuple[Path, Path | None]:
+    """Resolve a file or folder into ``(qcm_source, ps_source)`` for one experiment.
+
+    Makes the easy launcher work on a typical instrument folder that holds a QCM
+    export plus its potentiostat ``*_PS.csv``:
+
+    - a run directory or parquet → returned as the QCM source, no pairing;
+    - a QCM file → paired with a sibling PSTrace file in the same folder, if any;
+    - a folder → its QCM source (best of any duplicate formats) paired with its
+      PSTrace file.
+
+    Selection is deterministic rather than fatal: when a folder holds the same run
+    as both ``.txt`` and ``.csv``, the higher-priority format is used so the
+    one-command launch always works. Raises only when no QCM file is found.
+    """
+    path = Path(path)
+
+    def _split(files: list[Path]) -> tuple[list[Path], list[Path]]:
+        qcm, ps = [], []
+        for f in files:
+            kind = profile_kind(detect_profile(f) or "")
+            if kind in ("qcm", "parquet"):
+                qcm.append(f)
+            elif kind == "ps":
+                ps.append(f)
+        qcm.sort(key=lambda p: (_QCM_EXT_PRIORITY.get(p.suffix.lower(), 9), p.name))
+        return qcm, ps
+
+    if path.is_dir():
+        if (path / "manifest.json").exists():
+            return path, None  # already-ingested run directory
+        qcm, ps = _split(_candidate_files(path))
+        if not qcm:
+            raise ValueError(
+                f"No QCM data file (.txt/.csv/.parquet) found directly in {path}."
+            )
+        return qcm[0], _pick_ps(qcm[0].stem, ps)
+
+    # A single file: pair it with a sibling potentiostat export, if present.
+    if path.suffix.lower() == ".parquet":
+        return path, None
+    siblings = [f for f in _candidate_files(path.parent) if f != path]
+    _, ps = _split(siblings)
+    return path, _pick_ps(path.stem, ps)
 
 
 def import_run(
@@ -136,6 +203,7 @@ def import_run(
     else:
         raise ValueError(f"Unsupported QCM profile '{name}' for {source}.")
 
+    extra_metadata: dict | None = None
     if ps_source is not None:
         # A CV PSTrace export is potential/scan-indexed (per-scan i-vs-E blocks),
         # so it takes its own reader/attach; everything else is the time-indexed
@@ -143,10 +211,18 @@ def import_run(
         if is_cv_pstrace_csv(ps_source):
             # CV has no time axis: reconstruct it from the scan rate (explicit
             # override, else parsed from the CV/QCM filename, else the default).
-            rate = (cv_scan_rate
-                    or scan_rate_from_filename(ps_source)
-                    or scan_rate_from_filename(source))
+            # The scan rate scales the whole reconstructed time base, so record
+            # what was used and where it came from for the run-info readout.
+            if cv_scan_rate:
+                rate, rate_source = float(cv_scan_rate), "user override"
+            elif scan_rate_from_filename(ps_source):
+                rate, rate_source = scan_rate_from_filename(ps_source), "PS filename"
+            elif scan_rate_from_filename(source):
+                rate, rate_source = scan_rate_from_filename(source), "QCM filename"
+            else:
+                rate, rate_source = DEFAULT_CV_SCAN_RATE, "default (assumed)"
             frame = attach_cv_echem(frame, read_cv_pstrace_csv(ps_source), scan_rate=rate)
+            extra_metadata = {"cv_scan_rate_v_per_s": float(rate), "cv_scan_rate_source": rate_source}
         else:
             frame = attach_echem(frame, read_pstrace_csv(ps_source), offset_s=ps_offset_s)
     with tempfile.TemporaryDirectory() as tmp:
@@ -154,4 +230,4 @@ def import_run(
         frame.write_parquet(staged)
         return ingest(staged, dest, overwrite=overwrite,
                       raw_part_rows=raw_part_rows, memory_limit=memory_limit,
-                      source_label=str(source))
+                      source_label=str(source), extra_metadata=extra_metadata)

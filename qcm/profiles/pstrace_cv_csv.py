@@ -90,7 +90,9 @@ def read_cv_pstrace_csv(path: str | Path) -> pl.DataFrame:
 
 
 _SCANRATE_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*mVs", re.IGNORECASE)
-_DEFAULT_SCAN_RATE = 0.025  # V/s — PSTrace's common default when none is known
+# V/s — PSTrace's common default when no rate is given by override or filename.
+DEFAULT_CV_SCAN_RATE = 0.025
+_DEFAULT_SCAN_RATE = DEFAULT_CV_SCAN_RATE  # backward-compatible alias
 
 
 def scan_rate_from_filename(path: str | Path) -> float | None:

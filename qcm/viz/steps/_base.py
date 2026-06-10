@@ -85,7 +85,9 @@ class BaseStep:
                 # Keep the custom plot tooltip from plots.py.  The previous pass
                 # accidentally replaced it with raw x/y values; this hook should
                 # only consolidate duplicated hover tools, not redesign the tooltip.
-                keep.mode = "mouse"
+                # Do NOT force ``mode`` here: a vline-hover hook may have already
+                # set ``vline`` (the multi-overtone readout), and this hook now runs
+                # alongside it, so overriding to "mouse" would silently undo it.
                 keep.line_policy = "nearest"
                 keep.point_policy = "snap_to_data"
                 keep.attachment = "right"
@@ -115,9 +117,23 @@ class BaseStep:
         except Exception:
             pass
 
+    @staticmethod
+    def _existing_hooks(plot) -> list:
+        """Hooks already attached to an Overlay's plot options (empty on failure).
+
+        Used so height/hover helpers *append* rather than overwrite — otherwise
+        applying one hook silently drops the twin-axis, vline-hover, legend-mute,
+        saved-region and drag-select hooks the plot builders attached.
+        """
+        try:
+            return list(plot.opts.get("plot").kwargs.get("hooks", []) or [])
+        except Exception:
+            return []
+
     def nearest_hover(self, obj):
         try:
-            return obj.opts(hooks=[self._nearest_hover_hook])
+            hooks = self._existing_hooks(obj) + [self._nearest_hover_hook]
+            return obj.opts(hooks=hooks)
         except Exception:
             return obj
 
@@ -206,8 +222,9 @@ class BaseStep:
 
     def force_plot_height(self, plot, height: int):
         try:
+            hooks = self._existing_hooks(plot) + [self._force_plot_height_hook(height)]
             return plot.opts(
-                hv.opts.Overlay(height=height, responsive=True, hooks=[self._force_plot_height_hook(height)]),
+                hv.opts.Overlay(height=height, responsive=True, hooks=hooks),
                 hv.opts.Curve(height=height, responsive=True),
             )
         except Exception:
@@ -344,6 +361,7 @@ class BaseStep:
                 win = state.t_range_s
 
             title = f"{q.label} vs {ax.label} · {value_df.height:,} points · {elapsed:.0f} ms"
+            title += self._quantity_caveats(state, q)
             plot = plots.analysis_timeline(
                 value_df,
                 q,
@@ -370,6 +388,22 @@ class BaseStep:
             return self._finish_anchor(plot, ax, q, height, show_legend, label_df=value_df)
         except Exception as exc:  # pragma: no cover
             return pn.pane.Alert(f"Plot failed: {exc}", alert_type="danger")
+
+    @staticmethod
+    def _quantity_caveats(state, q) -> str:
+        """Honest footnotes for the plot title.
+
+        Surfaces two things that would otherwise be silent: that the MPE shown is
+        a clipped signal, and that Δf/n (or any overtone-normalized quantity) is a
+        no-op when every selected channel is the fundamental (n=1).
+        """
+        notes: list[str] = []
+        if q.kind == "mpe" and getattr(state, "mpe_clip", False):
+            notes.append(f"clipped to [{state.mpe_clip_lo:g}, {state.mpe_clip_hi:g}] g/mol")
+        if q.normalized and state.groups:
+            if all(int(state.orders.get(g, 1)) == 1 for g in state.groups):
+                notes.append("n=1 (no normalization)")
+        return ("  ·  " + " · ".join(notes)) if notes else ""
 
     def _anchor_window(self, state, window: str) -> tuple[float, float]:
         """The highlighted span for the hero plot in the active selection mode."""
@@ -438,6 +472,7 @@ class BaseStep:
 
         title = (f"{q.label} vs {ax.label} · {len(runset.runs)} runs · "
                  f"{frame.height:,} points")
+        title += self._quantity_caveats(state, q)
         plot = plots.overlay_timeline(
             frame, q, ax,
             run_labels=runset.labels(),
@@ -460,35 +495,3 @@ class BaseStep:
     # Backward-compatible alias: the per-step anchors call this.
     def overview_anchor(self, window: str = "current"):
         return self.unified_anchor(window=window)
-
-    def current_range_summary_cards(self):
-        try:
-            state = self.controls.state()
-            summary = self.data.region_summary(state)
-            if summary.is_empty():
-                return self.empty_state("No data in the current analysis range.")
-
-            cols = [c for c in ["df_n", "dD", "mass", "Q", "dD_per_df"] if c in summary.columns]
-            means = summary.select([pl.col(c).mean().alias(c) for c in cols]).to_dicts()[0]
-            start, end = state.t_range_s
-            duration = max(0.0, float(end) - float(start))
-            rows = [
-                ("Range", f"{duration:,.2f} s", f"{start:,.2f}–{end:,.2f} s"),
-                ("Mean Δf/n", self._fmt(means.get("df_n"), 2, " Hz"), ""),
-                ("Mean ΔD", self._fmt(means.get("dD"), 3, " ×10⁻⁶"), ""),
-                ("Mass", self._fmt(means.get("mass"), 1, " ng/cm²"), ""),
-                ("Mean Q", self._fmt(means.get("Q"), 0), ""),
-                ("ΔD/Δf", self._fmt(means.get("dD_per_df"), 4), ""),
-            ]
-            table = pl.DataFrame(rows, schema=["Metric", "Value", "Range"], orient="row")
-            return pn.widgets.Tabulator(
-                table.to_pandas(),
-                height=182,
-                layout="fit_data_fill",
-                show_index=False,
-                sizing_mode="stretch_width",
-                disabled=True,
-                css_classes=["summary-table"],
-            )
-        except Exception as exc:  # pragma: no cover
-            return pn.pane.Alert(f"Summary table failed: {exc}", alert_type="danger")

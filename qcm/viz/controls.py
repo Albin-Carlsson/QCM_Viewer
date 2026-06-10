@@ -18,7 +18,17 @@ from typing import Literal
 import panel as pn
 
 from .state import RunInfo, ViewState, parse_orders
-from .theme import AXES, QUANTITIES, ExperimentParams, area_to_diameter_mm, quantity
+from .theme import (
+    AREA_MIN_CM2,
+    AXES,
+    MPE_CLIP_HI_DEFAULT,
+    MPE_CLIP_LO_DEFAULT,
+    MPE_SMOOTH_WINDOW_DEFAULT,
+    QUANTITIES,
+    ExperimentParams,
+    area_to_diameter_mm,
+    quantity,
+)
 
 _QUANTITY_OPTIONS = {q.label: key for key, q in QUANTITIES.items()}
 _AXIS_OPTIONS = {a.label: key for key, a in AXES.items()}
@@ -74,9 +84,46 @@ class ViewerControls:
         self.saved = saved or {}
         self._last_baseline: tuple[float, float] | None = None
         self._syncing_ranges = False
+        # Only offer quantities/axes the run can actually compute, so a fit-only
+        # or echem-light run never lists a column it doesn't have (which would
+        # otherwise fail at query time with a DuckDB binder error).
+        self._quantity_options = self._available_quantity_options()
         self._build_widgets()
         self._build_param_widgets()
         self._build_mpe_widgets()
+
+    def _run_columns(self) -> set[str]:
+        return set(getattr(self.info, "columns", []) or [])
+
+    def _available_quantity_options(self) -> dict[str, str]:
+        """Label→key for quantities whose source columns the run actually has."""
+        cols = self._run_columns()
+        if not cols:  # unknown columns (older RunInfo): keep everything
+            return dict(_QUANTITY_OPTIONS)
+        return {
+            label: key for label, key in _QUANTITY_OPTIONS.items()
+            if set(QUANTITIES[key].sources).issubset(cols)
+        }
+
+    def _available_axis_options(self) -> dict[str, str]:
+        """Label→key for x-axes the run can plot (time always; others by column).
+
+        ``cycle_number`` is available when a stored ``cycle`` exists *or* a
+        ``current`` channel from which CP cycles are derived; ``cycle_time`` and
+        the potential/charge axes require their stored column.
+        """
+        cols = self._run_columns()
+        out: dict[str, str] = {}
+        for label, key in _AXIS_OPTIONS.items():
+            ax = AXES[key]
+            if ax.is_time:
+                out[label] = key
+            elif key == "cycle_number":
+                if "cycle" in cols or "current" in cols:
+                    out[label] = key
+            elif ax.source in cols:
+                out[label] = key
+        return out
 
     def _build_widgets(self) -> None:
         self._time_step = max(self.info.span_s / 10_000, 0.001)
@@ -295,9 +342,10 @@ class ViewerControls:
         # these widgets carry no built-in title (which Panel renders in a shadow
         # root that document CSS cannot reach — leaving it set produces a
         # duplicate label next to the eyebrow).
-        # Non-time axes (potential / charge / cycle) only have data on EQCM runs,
-        # so a pure-QCM run is offered Time only — no options that plot nothing.
-        x_options = dict(_AXIS_OPTIONS) if getattr(self.info, "has_echem", False) else {"Time": "time"}
+        # Offer only x-axes the run can actually plot (Time always; potential /
+        # charge / cycle-time / cycle-number gated on the columns being present),
+        # so no option silently fails with a missing-column query.
+        x_options = self._available_axis_options()
         x_value = self.saved.get("x_axis", "time")
         if x_value not in x_options.values():
             x_value = "time"
@@ -311,28 +359,27 @@ class ViewerControls:
                          "analysis window. Potential/charge axes sweep back and forth, so a "
                          "drag has no single window and selection is disabled there."),
         )
+        q_options = self._quantity_options
+        q_value = self.saved.get("quantity", "delta_f_norm")
+        if q_value not in q_options.values():
+            q_value = next(iter(q_options.values()))
         self.quantity_select = pn.widgets.Select(
             name="",
-            options=_QUANTITY_OPTIONS,
-            value=self.saved.get("quantity", "delta_f_norm"),
+            options=q_options,
+            value=q_value,
             sizing_mode="stretch_width",
             css_classes=["compact-select", "quantity-select"],
         )
         # --- redesign: top-of-plot toolbar widgets --------------------------
+        qr_value = self.saved.get("quantity_right", "delta_D")
+        if qr_value != "__none__" and qr_value not in q_options.values():
+            qr_value = "__none__"
         self.quantity_select_right = pn.widgets.Select(
             name="",
-            options={"None (single axis)": "__none__", **_QUANTITY_OPTIONS},
-            value=self.saved.get("quantity_right", "delta_D"),
+            options={"None (single axis)": "__none__", **q_options},
+            value=qr_value,
             sizing_mode="stretch_width",
             css_classes=["compact-select", "quantity-select-right"],
-        )
-        self.frequency_display = pn.widgets.RadioButtonGroup(
-            name="",
-            options={"Δf": "delta_f", "Δf/n": "delta_f_norm"},
-            value="delta_f" if self.quantity_select.value == "delta_f" else "delta_f_norm",
-            button_type="default",
-            sizing_mode="stretch_width",
-            css_classes=["freq-display-toggle"],
         )
         # NB: Panel's Checkbox has no `description`/tooltip, so the labels carry the
         # meaning ("y = 0 line" rather than the cryptic "Zero line").
@@ -345,11 +392,6 @@ class ViewerControls:
         self.show_cycles = pn.widgets.Checkbox(
             name="Show cycles", value=bool(self.saved.get("show_cycles", False)),
         )
-        # Keep the segmented frequency toggle and the left Y-axis selector in
-        # sync without an update loop (mirrors the range-sync guard pattern).
-        self._syncing_freq = False
-        self.frequency_display.param.watch(self._on_frequency_display, "value")
-        self.quantity_select.param.watch(self._on_quantity_for_frequency, "value")
         # A second Y-axis only makes sense as a vs-time comparison of two distinct
         # signals: disable it on cross-plots (vs potential/charge/cycle) and never
         # let the right axis duplicate the left.
@@ -598,15 +640,15 @@ class ViewerControls:
         """Editable per-run experiment parameters, seeded from saved state."""
         p = ExperimentParams.from_dict(self.saved.get("params"))
         self.param_area = pn.widgets.FloatInput(
-            name="Electrode area (cm²)", value=p.area_cm2, start=1e-6, step=0.01,
+            name="Electrode area (cm²)", value=p.area_cm2, start=AREA_MIN_CM2, step=0.01,
             sizing_mode="stretch_width",
         )
         self.param_sensitivity = pn.widgets.FloatInput(
-            name="Sauerbrey sensitivity (ng·cm⁻²·Hz⁻¹)", value=p.sensitivity, start=1e-6,
+            name="Sauerbrey sensitivity (ng·cm⁻²·Hz⁻¹)", value=p.sensitivity, start=AREA_MIN_CM2,
             step=0.1, sizing_mode="stretch_width",
         )
         self.param_molar_mass = pn.widgets.FloatInput(
-            name="Molar mass M (g/mol)", value=p.molar_mass, start=1e-6, step=0.01,
+            name="Molar mass M (g/mol)", value=p.molar_mass, start=AREA_MIN_CM2, step=0.01,
             sizing_mode="stretch_width",
         )
         self.param_valency = pn.widgets.IntInput(
@@ -656,18 +698,18 @@ class ViewerControls:
             name="Savitzky–Golay smoothing", value=bool(s.get("mpe_smooth", False)),
         )
         self.mpe_window = pn.widgets.IntInput(
-            name="Smoothing window", value=int(s.get("mpe_window", 51)), start=5, step=2,
-            sizing_mode="stretch_width",
+            name="Smoothing window", value=int(s.get("mpe_window", MPE_SMOOTH_WINDOW_DEFAULT)),
+            start=5, step=2, sizing_mode="stretch_width",
         )
         self.mpe_clip = pn.widgets.Checkbox(
             name="Clip outliers", value=bool(s.get("mpe_clip", True)),
         )
         self.mpe_clip_lo = pn.widgets.FloatInput(
-            name="Clip min (g/mol)", value=float(s.get("mpe_clip_lo", -100.0)), step=10.0,
+            name="Clip min (g/mol)", value=float(s.get("mpe_clip_lo", MPE_CLIP_LO_DEFAULT)), step=10.0,
             sizing_mode="stretch_width",
         )
         self.mpe_clip_hi = pn.widgets.FloatInput(
-            name="Clip max (g/mol)", value=float(s.get("mpe_clip_hi", 150.0)), step=10.0,
+            name="Clip max (g/mol)", value=float(s.get("mpe_clip_hi", MPE_CLIP_HI_DEFAULT)), step=10.0,
             sizing_mode="stretch_width",
         )
         self.mpe_target_show = pn.widgets.Checkbox(
@@ -678,6 +720,26 @@ class ViewerControls:
     def mpe_inputs(self) -> tuple:
         return (self.mpe_smooth, self.mpe_window, self.mpe_clip,
                 self.mpe_clip_lo, self.mpe_clip_hi, self.mpe_target_show)
+
+    def overtone_orders_panel(self) -> pn.viewable.Viewable:
+        """Editable overtone-order map (n per channel).
+
+        Orders are auto-inferred from the resonance frequencies; this lets you
+        override them for channels that aren't true odd-multiple overtones (which
+        is what makes Δf/n normalization a no-op when every channel reads n=1).
+        """
+        def readout(*_):
+            return pn.pane.Markdown(
+                " · ".join(f"**g{g} → n={n}**" for g, n in sorted(self.orders().items())),
+                margin=0, sizing_mode="stretch_width",
+            )
+        return pn.Card(
+            self.orders_text,
+            pn.bind(readout, self.orders_text),
+            title="Overtone orders (advanced)",
+            collapsible=True, collapsed=True, margin=0,
+            sizing_mode="stretch_width", css_classes=["qcm-card", "advanced-controls"],
+        )
 
     def mpe_display_panel(self) -> pn.viewable.Viewable:
         return pn.Card(
@@ -710,10 +772,10 @@ class ViewerControls:
             overtone_controls=self.overtone_controls_state(),
             params=self.params(),
             mpe_smooth=bool(self.mpe_smooth.value),
-            mpe_window=int(self.mpe_window.value or 51),
+            mpe_window=int(self.mpe_window.value or MPE_SMOOTH_WINDOW_DEFAULT),
             mpe_clip=bool(self.mpe_clip.value),
-            mpe_clip_lo=self._safe_float(self.mpe_clip_lo.value, -100.0),
-            mpe_clip_hi=self._safe_float(self.mpe_clip_hi.value, 150.0),
+            mpe_clip_lo=self._safe_float(self.mpe_clip_lo.value, MPE_CLIP_LO_DEFAULT),
+            mpe_clip_hi=self._safe_float(self.mpe_clip_hi.value, MPE_CLIP_HI_DEFAULT),
             mpe_target_show=bool(self.mpe_target_show.value),
         )
 
@@ -871,22 +933,6 @@ class ViewerControls:
     def _range_summary(self, start: float, end: float) -> str:
         return f"{start:,.3f}–{end:,.3f} s"
 
-    def orders_readout(self, *_):
-        return pn.pane.Markdown(
-            " · ".join(f"**g{g} → n={n}**" for g, n in sorted(self.orders().items())),
-            margin=0,
-            sizing_mode="stretch_width",
-        )
-
-    def channels_readout(self, *_):
-        total = len(self.info.groups)
-        selected = len(self.selected_groups())
-        return pn.pane.Markdown(
-            f"<small><b>{selected}</b> / <b>{total}</b> channels visible</small>",
-            margin=0,
-            sizing_mode="stretch_width",
-        )
-
     def draw_mode_status(self, *_):
         mode = self.brush_mode.value
         labels = {
@@ -900,27 +946,6 @@ class ViewerControls:
             sizing_mode="stretch_width",
         )
 
-    def quantity_context(self, quantity_key: str | None = None):
-        key = quantity_key or self.quantity_select.value
-        q = quantity(key)
-        unit = f" ({q.unit})" if q.unit else ""
-        if q.referenced:
-            text = (
-                f"<b>{q.label}{unit}</b><br>"
-                "Referenced quantity: values are calculated relative to the zero/reference range."
-            )
-        else:
-            text = (
-                f"<b>{q.label}{unit}</b><br>"
-                "Absolute/raw quantity: the zero/reference range is shown only for context and is not applied."
-            )
-        return pn.pane.Markdown(
-            f"<small>{text}</small>",
-            margin=0,
-            sizing_mode="stretch_width",
-            css_classes=["quantity-context"],
-        )
-
     def zero_reference_readout(self, *_):
         c0, c1 = (float(v) for v in self.t_range.value)
         z0, z1 = (float(v) for v in self.baseline_range.value)
@@ -930,30 +955,6 @@ class ViewerControls:
             f"<small>Current range: <b>{self._range_summary(c0, c1)}</b><br>"
             f"Zero/reference: <b>{self._range_summary(z0, z1)}</b>{suffix}<br>"
             "Δ-values are computed relative to the average signal in the zero/reference range.</small>",
-            margin=0,
-            sizing_mode="stretch_width",
-        )
-
-    def zero_reference_summary(self, *_):
-        c0, c1 = (float(v) for v in self.t_range.value)
-        z0, z1 = (float(v) for v in self.baseline_range.value)
-        same = abs(c0 - z0) < 1e-9 and abs(c1 - z1) < 1e-9
-        suffix = " · same range" if same else ""
-        return pn.pane.Markdown(
-            f"<small>Current: <b>{self._range_summary(c0, c1)}</b> · "
-            f"Zero/reference: <b>{self._range_summary(z0, z1)}</b>{suffix}</small>",
-            margin=0,
-            sizing_mode="stretch_width",
-        )
-
-    def sweep_context(self, *_):
-        mode = "selected channels" if self.sweep_mode.value == "selected overtones" else "one channel"
-        selected = ", ".join(str(g) for g in self.selected_groups())
-        start, end = (float(v) for v in self.t_range.value)
-        return pn.pane.Markdown(
-            f"<small><b>Sweep {int(self.sequence.value)}</b> · {mode}<br>"
-            f"Current range: <b>{self._range_summary(start, end)}</b><br>"
-            f"Visible groups: <b>{selected}</b></small>",
             margin=0,
             sizing_mode="stretch_width",
         )
@@ -1013,31 +1014,6 @@ class ViewerControls:
             css_classes=["plot-controls", "range-editor-card", "current-range-card"]
         )
 
-    def current_range_compact(self):
-        return self.current_range_controls(include_save=False)
-
-    def analysis_region_controls(self, summary=None):
-        """Compact Quantify target selector.
-
-        The selector no longer mutates the saved current range. Quantify reads
-        the selected target directly, so choosing a marker zooms that page to
-        the marker while choosing Current range returns to the live range.
-        """
-        target_stack = pn.Column(
-            self.analysis_region_select,
-            summary if summary is not None else pn.Spacer(height=0),
-            margin=0,
-            sizing_mode="stretch_width",
-            css_classes=["analysis-target-stack", "compact-panel"],
-        )
-        return pn.Row(
-            target_stack,
-            self.current_range_controls(include_save=False),
-            margin=0,
-            sizing_mode="stretch_width",
-            css_classes=["analysis-region-row", "compact-two-column", "analysis-target-row"],
-        )
-
     def zero_reference_controls(self, with_slider: bool = True):
         children = [pn.bind(self.zero_reference_readout, self.t_range, self.baseline_range)]
         if with_slider:
@@ -1052,16 +1028,6 @@ class ViewerControls:
             sizing_mode="stretch_width",
             css_classes=["plot-controls", "range-editor-card", "reference-range-card"]
         )
-
-    def zero_reference_compact(self, quantity_key: str | None = None):
-        key = quantity_key or self.quantity_select.value
-        if not quantity(key).referenced:
-            return pn.pane.Markdown(
-                "<small>Absolute/raw quantity: the zero/reference range is ignored.</small>",
-                margin=0,
-                sizing_mode="stretch_width",
-            )
-        return self.zero_reference_controls()
 
     def mark_range_controls(self, with_slider: bool = True):
         children = []
@@ -1117,41 +1083,6 @@ class ViewerControls:
             css_classes=["phase-mark-card"],
         )
 
-    def active_range_controls(
-        self,
-        *,
-        extra_class: str = "",
-        quantity_key: str | None = None,
-        include_save: bool = False,
-    ):
-        def _view(mode: str, qkey: str | None = None):
-            if mode == "reference":
-                return self.zero_reference_controls()
-            if mode == "mark":
-                return self.mark_range_controls()
-            return self.current_range_controls(include_save=include_save)
-
-        deps = [self.brush_mode]
-        if quantity_key is not None:
-            return pn.Column(
-                self.brush_mode,
-                pn.Row(self.plot_reset_button(), margin=0, sizing_mode="stretch_width", css_classes=["range-actions"]),
-                pn.bind(_view, self.brush_mode, quantity_key),
-                self.range_status,
-                margin=0,
-                sizing_mode="stretch_width",
-                css_classes=["plot-controls", "paired-ranges", extra_class],
-            )
-        return pn.Column(
-            self.brush_mode,
-            pn.Row(self.plot_reset_button(), margin=0, sizing_mode="stretch_width", css_classes=["range-actions"]),
-            pn.bind(_view, self.brush_mode),
-            self.range_status,
-            margin=0,
-            sizing_mode="stretch_width",
-            css_classes=["plot-controls", "paired-ranges", extra_class],
-        )
-
     def active_range_editor(
         self,
         *,
@@ -1189,108 +1120,31 @@ class ViewerControls:
         Only the slider for the current selection mode is mounted (so the
         ``t_range`` / ``baseline_range`` / ``mark_range`` singletons are never
         double-mounted). The numeric editor lives in the selection bar below.
+
+        The analysis range is a *time* interval, so the slider is shown only on
+        the Time axis. On other axes a scrubber would be misleading (potential and
+        charge are non-monotonic — the same value recurs every cycle), so a short
+        note replaces it: monotonic axes still support drag-to-select, others
+        don't.
         """
-        def pick(mode, *_):
+        def pick(mode, x_axis, *_):
+            if x_axis != "time":
+                ax = AXES.get(x_axis)
+                label = ax.label if ax else x_axis
+                drag_ok = bool(ax and ax.monotonic)
+                how = ("drag on the plot to select a range, or switch the X-axis to "
+                       "Time to scrub here." if drag_ok else
+                       f"selection isn't available on the {label} axis (it sweeps back "
+                       "and forth); switch the X-axis to Time to set the range.")
+                return pn.pane.HTML(
+                    f"<div class='qcm-plot-rangenote'>Analysis range is a time window — {how}</div>",
+                    margin=0, sizing_mode="stretch_width",
+                )
             slider = {"reference": self.baseline_range, "mark": self.mark_range}.get(mode, self.t_range)
             return slider
         return pn.Column(
-            pn.bind(pick, self.brush_mode),
+            pn.bind(pick, self.brush_mode, self.x_axis_select),
             margin=0, sizing_mode="stretch_width", css_classes=["qcm-plot-rangeslider"],
-        )
-
-    def paired_range_controls(
-        self,
-        extra_class: str,
-        quantity_key: str | None = None,
-        include_save: bool = False,
-    ):
-        # Backward-compatible name: now shows only the selected range editor.
-        return self.active_range_controls(
-            extra_class=extra_class,
-            quantity_key=quantity_key,
-            include_save=include_save,
-        )
-
-    def overview_range_controls(self, include_reset: bool = True):
-        # Review is only for selecting the current analysis range. Reference and
-        # phase marking happen on their own pages, so no range-target switch is
-        # shown here.
-        self.brush_mode.value = "current"
-        children = [self.current_range_controls(include_save=False)]
-        if include_reset:
-            children.insert(0, self.plot_tools_row(include_quantity=False))
-        children.append(self.range_status)
-        return pn.Column(
-            *children,
-            margin=0,
-            sizing_mode="stretch_width",
-            css_classes=["plot-controls", "overview-ranges"],
-        )
-
-    def analyze_range_controls(self, quantity_key: str | None = None, include_save: bool = True, include_reset: bool = True):
-        # Quantify is also current-range only; reference and marking are handled
-        # by the dedicated Reference and Phases steps.
-        self.brush_mode.value = "current"
-        children = [self.current_range_controls(include_save=include_save)]
-        if include_reset:
-            children.insert(0, self.plot_tools_row(include_quantity=True))
-        children.append(self.range_status)
-        return pn.Column(
-            *children,
-            margin=0,
-            sizing_mode="stretch_width",
-            css_classes=["plot-controls", "analyze-ranges"],
-        )
-
-    def zero_reference_if_needed(self, quantity_key: str | None = None):
-        key = quantity_key or self.quantity_select.value
-        if not quantity(key).referenced:
-            return pn.pane.Markdown(
-                "<small>This quantity is absolute/raw, so no reference range is needed.</small>",
-                margin=0,
-                sizing_mode="stretch_width",
-            )
-        return self.zero_reference_controls()
-
-    def window_controls(self, include_zero_reference: bool = True):
-        items = [self.current_range_controls()]
-        if include_zero_reference:
-            items.append(self.zero_reference_controls())
-        return pn.Column(*items, margin=0, sizing_mode="stretch_width", css_classes=["plot-controls"])
-
-
-    def compact_channel_controls(self):
-        """Compact, collapsed channel chooser for placement next to plot reset."""
-        card = self.channel_controls()
-        card.collapsed = True
-        card.width = 280
-        card.sizing_mode = "fixed"
-        return card
-
-    def plot_tools_row(self, *, include_quantity: bool = False):
-        """Small per-plot toolbar: reset scale, optional quantity selector, channels."""
-        items = [self.plot_reset_button()]
-        if include_quantity:
-            items.append(self.x_axis_select)
-            items.append(self.quantity_select)
-        items.append(self.compact_channel_controls())
-        return pn.Row(
-            *items,
-            margin=0,
-            sizing_mode="stretch_width",
-            css_classes=["plot-tools-row"],
-        )
-
-    def channel_controls(self):
-        return pn.Card(
-            pn.bind(self.channels_readout, self.group_select),
-            self.group_select,
-            self.show_all_channels_button,
-            title="Channels",
-            collapsible=False,
-            margin=0,
-            sizing_mode="stretch_width",
-            css_classes=["channel-controls"],
         )
 
     def overtone_controls(self):
@@ -1341,45 +1195,12 @@ class ViewerControls:
             css_classes=["qcm-card", "overtone-controls"],
         )
 
-    def advanced_controls(self):
-        return pn.Card(
-            self.orders_text,
-            pn.bind(self.orders_readout, self.orders_text),
-            title="Advanced: overtone orders",
-            collapsible=True,
-            collapsed=True,
-            margin=0,
-            sizing_mode="stretch_width",
-            css_classes=["advanced-controls"],
-        )
-
-    def workspace_controls(self):
-        return pn.Card(
-            self.save_state_button,
-            self.status,
-            title="Workspace",
-            collapsible=True,
-            collapsed=True,
-            margin=0,
-            sizing_mode="stretch_width",
-            css_classes=["workspace-controls"],
-        )
-
     # ================================================ redesign: toolbar/selection
-    def _on_frequency_display(self, _event=None) -> None:
-        if self._syncing_freq:
-            return
-        self._syncing_freq = True
-        try:
-            self.quantity_select.value = self.frequency_display.value
-        finally:
-            self._syncing_freq = False
-
     def _refresh_right_axis_options(self, _event=None) -> None:
-        """Right-axis menu = None + every quantity except the one already on the left."""
+        """Right-axis menu = None + every available quantity except the left one."""
         left = self.quantity_select.value
         options = {"None (single axis)": "__none__"}
-        options.update({label: key for label, key in _QUANTITY_OPTIONS.items() if key != left})
+        options.update({label: key for label, key in self._quantity_options.items() if key != left})
         current = self.quantity_select_right.value
         self.quantity_select_right.options = options
         if current not in options.values():
@@ -1391,16 +1212,6 @@ class ViewerControls:
         self.quantity_select_right.disabled = not is_time
         if not is_time:
             self.quantity_select_right.value = "__none__"
-
-    def _on_quantity_for_frequency(self, _event=None) -> None:
-        if self._syncing_freq:
-            return
-        if self.quantity_select.value in ("delta_f", "delta_f_norm"):
-            self._syncing_freq = True
-            try:
-                self.frequency_display.value = self.quantity_select.value
-            finally:
-                self._syncing_freq = False
 
     @staticmethod
     def _toolcell(eyebrow: str, widget, *, grow: bool = False):
@@ -1428,43 +1239,6 @@ class ViewerControls:
             self._toolcell("Y-axis (right)", self.quantity_select_right, grow=True),
             toggles,
             margin=0, sizing_mode="stretch_width", css_classes=["qcm-toolbar2"],
-        )
-
-    def active_range_values(self) -> tuple[float, float]:
-        """(start, end) of whichever range the brush/selection mode targets."""
-        mode = self.brush_mode.value
-        if mode == "reference":
-            lo, hi = self.baseline_range.value
-        elif mode == "mark":
-            lo, hi = self.mark_range.value
-        else:
-            lo, hi = self.t_range.value
-        return float(lo), float(hi)
-
-    def selection_readout(self, *_):
-        """Start / End / Duration cards for the active selection mode."""
-        from .components import icon_stat
-        lo, hi = self.active_range_values()
-        dur = max(0.0, hi - lo)
-        cells = [
-            icon_stat("Start", f"{lo:,.3f} s", icon="time"),
-            icon_stat("End", f"{hi:,.3f} s", icon="time"),
-            icon_stat("Duration", f"{dur:,.3f} s", icon="time", tone="accent"),
-        ]
-        return pn.pane.HTML(
-            f"<div class='qcm-selreadout'>{''.join(cells)}</div>",
-            margin=0, sizing_mode="stretch_width",
-        )
-
-    def duration_readout(self, *_):
-        """A single Duration chip for the active selection (Start/End live in the editor)."""
-        lo, hi = self.active_range_values()
-        dur = max(0.0, hi - lo)
-        return pn.pane.HTML(
-            "<div class='qcm-selchip accent'>"
-            "<span class='k'>Duration</span>"
-            f"<span class='v'>{dur:,.3f} s</span></div>",
-            margin=0, sizing_mode="stretch_width",
         )
 
     def selection_cards(self):

@@ -18,9 +18,17 @@ def write_analysis_notebook(
     groups: list[int] | None = None,
     region_label: str = "current range",
     quantity_key: str = "sauerbrey_mass",
+    params: dict | None = None,
 ) -> Path:
-    """Write a reproducible notebook for the current range or a saved region."""
+    """Write a reproducible notebook for the current range or a saved region.
+
+    ``params`` is the run's editable experiment parameters (electrode area,
+    Sauerbrey sensitivity, molar mass, valency) as a dict — embedded so the
+    notebook reproduces exactly the mass/MPE the UI showed, not the defaults.
+    """
     import nbformat as nbf
+
+    from .viz.theme import DEFAULT_PARAMS
 
     out = Path(output)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -29,6 +37,7 @@ def write_analysis_notebook(
     t1p = parse_time(t1, run.time_end)
     groups_arg = groups if groups is not None else run.groups
     orders = run.overtone_orders()
+    params = params if params is not None else DEFAULT_PARAMS.to_dict()
     project_root = Path(__file__).resolve().parents[1]
 
     setup = f'''# Environment and imports
@@ -47,6 +56,9 @@ ORDERS = {orders!r}
 COLUMNS = {columns!r}
 REGION_LABEL = {region_label!r}
 SELECTED_QUANTITY = {quantity_key!r}
+# Experiment parameters captured from the UI when this notebook was exported, so
+# Sauerbrey mass and MPE reproduce exactly what you saw (not the library defaults).
+PARAMS = {params!r}
 US = 1_000_000
 
 REQUIRED = [
@@ -89,17 +101,19 @@ import pandas as pd
 import holoviews as hv
 import hvplot.polars  # registers .hvplot on Polars DataFrames
 from qcm.viz import science
-from qcm.viz.theme import QUANTITIES, quantity
+from qcm.viz.theme import QUANTITIES, ExperimentParams, quantity
 
 hv.extension("bokeh")
 
 run = qcm.open_run(RUN_PATH)
+PARAMS_OBJ = ExperimentParams.from_dict(PARAMS)  # area, sensitivity, molar mass, valency
 span_s = (T1 - T0) / US
 print("Run:", run.id)
 print("Region:", REGION_LABEL)
 print("Selected UI quantity:", SELECTED_QUANTITY)
 print(f"Window: {{span_s:.3f}} s")
 print("Groups:", GROUPS)
+print("Experiment params:", PARAMS)
 '''
 
     load = '''# Load raw fit data for this exact exported region.
@@ -130,7 +144,7 @@ main_selected = run.timeline(list(q.sources), t0=T0, t1=T1, groups=GROUPS)
 baseline_selected = None
 if q.referenced:
     baseline_selected = run.timeline(list(q.sources), t0=B0, t1=B1, groups=GROUPS, level="raw")
-selected_df = add_elapsed(science.compute(main_selected, SELECTED_QUANTITY, ORDERS, baseline_df=baseline_selected))
+selected_df = add_elapsed(science.compute(main_selected, SELECTED_QUANTITY, ORDERS, baseline_df=baseline_selected, params=PARAMS_OBJ))
 selected_title = f"{q.label} — {REGION_LABEL}"
 selected_plot = selected_df.hvplot.line(
     x="elapsed_s", y="value", by="group", responsive=True, height=420,
@@ -143,8 +157,8 @@ selected_plot
 baseline = run.timeline(["fit_center", "fit_fwhm"], t0=B0, t1=B1, groups=GROUPS, level="raw")
 main = run.timeline(["fit_center", "fit_fwhm"], t0=T0, t1=T1, groups=GROUPS)
 
-df_norm = add_elapsed(science.compute(main, "delta_f_norm", ORDERS, baseline_df=baseline))
-dD = add_elapsed(science.compute(main, "delta_D", ORDERS, baseline_df=baseline))
+df_norm = add_elapsed(science.compute(main, "delta_f_norm", ORDERS, baseline_df=baseline, params=PARAMS_OBJ))
+dD = add_elapsed(science.compute(main, "delta_D", ORDERS, baseline_df=baseline, params=PARAMS_OBJ))
 
 qcmd_long = pl.concat([
     df_norm.with_columns(pl.lit("delta_f_norm").alias("quantity_key"), pl.lit("Δf/n [Hz]").alias("quantity")),
@@ -162,7 +176,7 @@ for key in QUANTITIES:
     baseline_q = None
     if q.referenced:
         baseline_q = run.timeline(source_cols, t0=B0, t1=B1, groups=GROUPS, level="raw")
-    values = science.compute(main_q, key, ORDERS, baseline_df=baseline_q)
+    values = science.compute(main_q, key, ORDERS, baseline_df=baseline_q, params=PARAMS_OBJ)
     s = science.summary_stats(values).with_columns(
         pl.lit(key).alias("quantity_key"),
         pl.lit(q.label).alias("quantity"),

@@ -279,5 +279,6 @@ class ViewerActions:
             groups=state.groups,
             region_label=label,
             quantity_key=state.quantity,
+            params=state.params.to_dict(),
         )
         return open(tmp.name, "rb")

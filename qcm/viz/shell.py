@@ -161,6 +161,13 @@ class ViewerShell:
             rows.append(("Sample rate", f"{meta['sample_rate']} Hz"))
         if meta.get("temperature") is not None:
             rows.append(("Temperature", f"{meta['temperature']} °C"))
+        # A CV's time axis is reconstructed from this rate, so make the assumption
+        # (and where it came from) visible rather than silent.
+        cv_rate = meta.get("cv_scan_rate_v_per_s")
+        if cv_rate is not None:
+            src = meta.get("cv_scan_rate_source", "")
+            suffix = f" ({src})" if src else ""
+            rows.append(("CV scan rate", f"{float(cv_rate) * 1000:.1f} mV/s{suffix}"))
         rows.append(("Sweeps", str(self.info.n_sweeps)))
         return pn.Card(
             run_info_table(rows),
@@ -582,6 +589,7 @@ class ViewerShell:
             self._rail_edit_phases(),
             self._rail_live_stats(),
             self.controls.experiment_params_panel(),
+            self.controls.overtone_orders_panel(),
             self.controls.mpe_display_panel(),
             margin=0, sizing_mode="stretch_width", css_classes=["qcm-rail"],
         )

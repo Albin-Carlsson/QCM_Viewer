@@ -11,7 +11,6 @@ import polars as pl
 from .models import Manifest, TimelineResult, Annotation
 from .timeutil import parse_time, choose_level
 from .annotations import load_annotations, create_annotation, save_annotations
-from . import derived as derived_mod
 
 SWEEP_TIMELINE_COLUMNS = {"fit_center", "fit_gamma", "fit_fwhm"}
 
@@ -243,27 +242,6 @@ class QCMRun:
         sql += ' GROUP BY "group" ORDER BY "group"'
         return self.conn.execute(sql, params).pl()
 
-    def region_stats(
-        self,
-        columns: list[str],
-        t0: int | str | None = None,
-        t1: int | str | None = None,
-        groups: list[int] | None = None,
-    ) -> pl.DataFrame:
-        df = self.timeline(columns, t0=t0, t1=t1, groups=groups, level="raw")
-        if df.is_empty():
-            return pl.DataFrame()
-        aggs: list[Any] = []
-        for c in columns:
-            aggs.extend([
-                pl.col(c).mean().alias(f"{c}_mean"),
-                pl.col(c).std().alias(f"{c}_std"),
-                pl.col(c).min().alias(f"{c}_min"),
-                pl.col(c).max().alias(f"{c}_max"),
-                (pl.col(c).last() - pl.col(c).first()).alias(f"{c}_delta"),
-            ])
-        return df.group_by("group").agg(aggs).sort("group")
-
     def frequency_band(
         self,
         f0: float,
@@ -305,18 +283,6 @@ class QCMRun:
         anns = [a for a in load_annotations(self.path) if a.id != annotation_id]
         save_annotations(self.path, anns)
 
-    def derived(self, name: str, t0=None, t1=None, groups: list[int] | None = None, harmonic: int | None = None) -> pl.DataFrame:
-        base = self.timeline(["fit_center", "fit_fwhm", "fit_gamma"], t0=t0, t1=t1, groups=groups, level="raw")
-        if name == "sauerbrey_mass":
-            return derived_mod.sauerbrey_mass(base, harmonic=harmonic)
-        if name == "quality_factor":
-            return derived_mod.quality_factor(base)
-        if name == "dissipation":
-            return derived_mod.dissipation(base)
-        if name == "delta_f":
-            return derived_mod.delta_f(base)
-        raise ValueError(f"Unknown derived quantity: {name}")
-
     def export_data(self, output: str | Path, columns: list[str], t0=None, t1=None, groups: list[int] | None = None, fmt: str = "parquet") -> Path:
         df = self.timeline(columns, t0=t0, t1=t1, groups=groups, level="raw")
         out = Path(output)
@@ -350,6 +316,7 @@ class QCMRun:
         groups: list[int] | None = None,
         region_label: str = "current range",
         quantity_key: str = "sauerbrey_mass",
+        params: dict | None = None,
     ) -> Path:
         from .notebooks import write_analysis_notebook
 
@@ -362,6 +329,7 @@ class QCMRun:
             groups=groups,
             region_label=region_label,
             quantity_key=quantity_key,
+            params=params,
         )
 
 

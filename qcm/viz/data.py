@@ -17,7 +17,7 @@ from qcm.run import QCMRun
 
 from . import echem, plots, science
 from .state import RunInfo, ViewState
-from .theme import axis, quantity
+from .theme import MPE_SMOOTH_WINDOW_DEFAULT, axis, quantity
 
 _US = 1_000_000
 _CACHE_SIZE = 64
@@ -90,7 +90,7 @@ class QCMViewData:
             out = science.smooth_clip_mpe(
                 out, clip=clip,
                 smooth=getattr(state, "mpe_smooth", False),
-                window=getattr(state, "mpe_window", 51),
+                window=getattr(state, "mpe_window", MPE_SMOOTH_WINDOW_DEFAULT),
             )
         out = self.add_elapsed(out)
         out = self._attach_x(out, ax, t0, t1, groups)

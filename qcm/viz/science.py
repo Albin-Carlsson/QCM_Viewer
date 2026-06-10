@@ -14,10 +14,14 @@ from __future__ import annotations
 import polars as pl
 
 from .theme import (
+    CHARGE_EPS_C,
     DEFAULT_PARAMS,
     DISSIPATION_SCALE,
-    ELECTRODE_AREA_CM2,
     FARADAY_CONSTANT,
+    FREQ_EPS_HZ,
+    MPE_SAVGOL_POLYORDER,
+    MPE_SMOOTH_WINDOW_DEFAULT,
+    NG_PER_CM2_TO_G,
     ExperimentParams,
     Quantity,
     quantity as get_quantity,
@@ -35,8 +39,11 @@ def _raw_value(df: pl.DataFrame, q: Quantity) -> pl.Expr:
     if q.kind in ("frequency", "mass", "mpe"):
         # MPE/mass start from Δf/n (referencing turns fit_center into Δf).
         return pl.col("fit_center")
-    if q.kind == "echem_density":  # current density = current / electrode area
-        return (pl.col("current") / ELECTRODE_AREA_CM2)
+    if q.kind == "echem_density":
+        # Current density = current / electrode area. The area division is applied
+        # in ``compute`` from the run's editable params, so the per-row raw value
+        # here is just the current (keeps the configured area authoritative).
+        return pl.col("current")
     if q.kind == "echem":  # potential, current, charge — straight passthrough
         return pl.col(q.sources[0])
     # raw passthrough (fit_center absolute, fit_fwhm, fit_gamma)
@@ -57,7 +64,9 @@ def raw_value_sql(q: Quantity) -> str:
     if q.kind in ("frequency", "mass", "mpe"):
         return "fit_center"
     if q.kind == "echem_density":
-        return f"(current / {ELECTRODE_AREA_CM2})"
+        # Area division happens in Python (see ``_raw_value``); current density is
+        # not a referenced quantity, so this SQL path is unused but kept honest.
+        return "current"
     return q.sources[0]
 
 
@@ -103,6 +112,10 @@ def compute(
 
     out = df.select([*_KEEP, *q.sources]).with_columns(_raw_value(df, q).alias("value"))
 
+    if q.kind == "echem_density":
+        # Current density honors the run's configured electrode area.
+        out = out.with_columns((pl.col("value") / params.area_cm2).alias("value"))
+
     if q.referenced:
         if baseline_means_df is not None and not baseline_means_df.is_empty():
             base = baseline_means_df
@@ -128,7 +141,7 @@ def compute(
         # finite difference per overtone over time; steps with no charge change
         # are left null instead of dividing by zero.
         out = out.sort(["group", "timestamp"]).with_columns(
-            (pl.col("value") * params.area_cm2 * 1e-9).alias("_mass_g")
+            (pl.col("value") * params.area_cm2 * NG_PER_CM2_TO_G).alias("_mass_g")
         )
         dq = pl.col("charge").diff().over("group")
         dm = pl.col("_mass_g").diff().over("group")
@@ -137,7 +150,7 @@ def compute(
         # cathodic-charge sign (plating: Δm>0, Δq<0) that would otherwise make the
         # ratio negative.
         out = out.with_columns(
-            pl.when(dq.abs() > 1e-15)
+            pl.when(dq.abs() > CHARGE_EPS_C)
             .then(-FARADAY_CONSTANT * dm / dq)
             .otherwise(None)
             .alias("value")
@@ -151,8 +164,8 @@ def smooth_clip_mpe(
     *,
     clip: tuple[float, float] | None = None,
     smooth: bool = False,
-    window: int = 51,
-    polyorder: int = 2,
+    window: int = MPE_SMOOTH_WINDOW_DEFAULT,
+    polyorder: int = MPE_SAVGOL_POLYORDER,
 ) -> pl.DataFrame:
     """Clip MPE outliers and optionally Savitzky–Golay smooth, per group.
 
@@ -282,7 +295,7 @@ def region_overtone_summary(
     )
     if "df_n" in out.columns and "dD" in out.columns:
         out = out.with_columns(
-            pl.when(pl.col("df_n").abs() > 1e-12)
+            pl.when(pl.col("df_n").abs() > FREQ_EPS_HZ)
             .then(pl.col("dD") / (-pl.col("df_n")))
             .otherwise(None)
             .alias("dD_per_df")

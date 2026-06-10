@@ -75,8 +75,88 @@ class QCMViewer:
         return self.shell.view()
 
 
+def _is_run_dir(path: str | Path) -> bool:
+    """True for an already-ingested run directory (has a manifest)."""
+    p = Path(path)
+    return p.is_dir() and (p / "manifest.json").exists()
+
+
+def _landing():
+    """Friendly empty state: pick a run folder or instrument file, then open it.
+
+    Shown when the viewer is served with no (valid) run, so a non-technical user
+    sees a file picker instead of a stack trace. Imports the chosen source in
+    place and swaps the page to the live viewer on success.
+    """
+    import tempfile
+
+    from qcm.profiles import import_run, resolve_import_target
+
+    _ensure_app_css()
+    root = pn.Column(sizing_mode="stretch_width", css_classes=["qcm-app"])
+    browser = pn.widgets.FileSelector(
+        directory=str(Path.cwd()), only_files=False, sizing_mode="stretch_width",
+    )
+    status = pn.pane.Alert(
+        "Pick a run folder, or a QCM instrument file (.csv / .txt) or parquet, then Open.",
+        alert_type="light", sizing_mode="stretch_width",
+    )
+    open_btn = pn.widgets.Button(name="Open", button_type="primary", icon="folder-open")
+
+    def _set(kind: str, msg: str) -> None:
+        status.alert_type = kind
+        status.object = msg
+
+    def _open(_event=None):
+        selected = browser.value
+        paths = selected if isinstance(selected, list) else ([selected] if selected else [])
+        if not paths:
+            _set("warning", "Select a file or folder first.")
+            return
+        run_dirs: list[Path] = []
+        for src in paths:
+            src = Path(src)
+            try:
+                qcm_src, ps_src = resolve_import_target(src)
+                if _is_run_dir(qcm_src):
+                    run_dirs.append(qcm_src)
+                else:
+                    paired = f" + {ps_src.name}" if ps_src else ""
+                    _set("light", f"Importing {qcm_src.name}{paired} …")
+                    dest = Path(tempfile.mkdtemp(prefix="qcm_view_")) / f"{qcm_src.stem}_run"
+                    import_run(qcm_src, dest, ps_source=ps_src)
+                    run_dirs.append(dest)
+            except Exception as exc:  # noqa: BLE001
+                _set("danger", f"Could not open {src.name}: {exc}")
+                return
+        try:
+            root.objects = [QCMViewer(run_dirs).view()]
+        except Exception as exc:  # noqa: BLE001
+            _set("danger", f"Failed to load: {exc}")
+
+    open_btn.on_click(_open)
+    root.objects = [pn.Column(
+        pn.pane.HTML(
+            "<div style='max-width:760px;margin:48px auto 0'>"
+            "<h1 style='margin:0 0 4px'>QCM-D Viewer</h1>"
+            "<p style='color:#64748b;margin:0 0 20px'>Open a measurement to begin.</p></div>"
+        ),
+        pn.Column(browser, pn.Row(open_btn, margin=0), status,
+                  css_classes=["qcm-card"], margin=(0, 0, 0, 0),
+                  styles={"max-width": "760px", "margin": "0 auto"}),
+        sizing_mode="stretch_width",
+    )]
+    return root
+
+
 def app(run_path: str | list[str] | None = None):
     if run_path is None:
         args = sys.argv[1:]
-        run_path = args if args else ["."]
-    return QCMViewer(run_path).view()
+        run_path = args if args else None
+    if not run_path:
+        return _landing()
+    paths = [run_path] if isinstance(run_path, (str, Path)) else list(run_path)
+    valid = [p for p in paths if _is_run_dir(p)]
+    if not valid:
+        return _landing()
+    return QCMViewer(valid).view()

@@ -4,7 +4,13 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from .theme import DEFAULT_PARAMS, ExperimentParams
+from .theme import (
+    DEFAULT_PARAMS,
+    MPE_CLIP_HI_DEFAULT,
+    MPE_CLIP_LO_DEFAULT,
+    MPE_SMOOTH_WINDOW_DEFAULT,
+    ExperimentParams,
+)
 
 _US = 1_000_000
 
@@ -26,6 +32,7 @@ class RunInfo:
     n_sweeps: int
     rows: int | str = "?"
     has_echem: bool = False
+    columns: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -49,10 +56,10 @@ class ViewState:
     params: ExperimentParams = DEFAULT_PARAMS
     # MPE display controls (apply only to the mass-per-electron quantity).
     mpe_smooth: bool = False
-    mpe_window: int = 51
+    mpe_window: int = MPE_SMOOTH_WINDOW_DEFAULT
     mpe_clip: bool = True
-    mpe_clip_lo: float = -100.0
-    mpe_clip_hi: float = 150.0
+    mpe_clip_lo: float = MPE_CLIP_LO_DEFAULT
+    mpe_clip_hi: float = MPE_CLIP_HI_DEFAULT
     mpe_target_show: bool = True
 
     def t_us(self, t0_us: int) -> tuple[int, int]:

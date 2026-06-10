@@ -18,15 +18,17 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import holoviews as hv
 import panel as pn
 import polars as pl
 
 from .. import echem, plots
 from ..components import icon_stat, stat_grid
 from ..theme import (
+    CHARGE_EPS_C,
     COMPACT_PLOT_HEIGHT,
-    ELECTRODE_AREA_CM2,
     FARADAY_CONSTANT,
+    NG_PER_CM2_TO_G,
     PLOT_HEIGHT,
     RESULTS_PLOT_HEIGHT,
     axis,
@@ -136,7 +138,8 @@ class ResultsStep(BaseStep):
             hi=int(self.cycle_range.value[1]),
         )
         if _I in wf.columns:
-            wf = wf.with_columns((pl.col(_I) / ELECTRODE_AREA_CM2).alias(_J))
+            area = self.controls.state().params.area_cm2
+            wf = wf.with_columns((pl.col(_I) / area).alias(_J))
         return wf
 
     def _selected_waveform(self) -> pl.DataFrame:
@@ -212,7 +215,8 @@ class ResultsStep(BaseStep):
             if not self.data.has_echem():
                 return self.empty_state("This run has no electrochemistry channel.")
             technique = self._technique()
-            meta = echem.metadata(self.data.echem_waveform(), technique)
+            area = self.controls.state().params.area_cm2
+            meta = echem.metadata(self.data.echem_waveform(), technique, area)
             if technique == "cp":
                 rows = [
                     ("Technique", "Chronopotentiometry"),
@@ -294,8 +298,8 @@ class ResultsStep(BaseStep):
             dq = (pl.col(_Q).sort_by("timestamp").last()
                   - pl.col(_Q).sort_by("timestamp").first()).alias("_dq")
             mpe = (
-                pl.when(pl.col("_dq").abs() > 1e-15)
-                .then(-FARADAY_CONSTANT * (pl.col("_dm_ng") * area * 1e-9) / pl.col("_dq"))
+                pl.when(pl.col("_dq").abs() > CHARGE_EPS_C)
+                .then(-FARADAY_CONSTANT * (pl.col("_dm_ng") * area * NG_PER_CM2_TO_G) / pl.col("_dq"))
                 .otherwise(None)
                 .round(2)
             )
@@ -362,9 +366,13 @@ class ResultsStep(BaseStep):
         return pl.concat(frames, how="diagonal_relaxed")
 
     @staticmethod
-    def _robust_ylim(frame: pl.DataFrame, cols, *, include=None):
-        """A y-range from the 2nd–98th percentile (+pad) so a single bad cycle
-        (e.g. an incomplete final half-cycle) can't blow out the scale."""
+    def _robust_ylim(frame: pl.DataFrame, cols, *, include=None, pct=(2, 98)):
+        """A y-range from a low/high percentile (+pad) so a few outlier points or
+        a bad cycle can't compress the interesting band to a sliver.
+
+        ``pct`` widens (e.g. ``(1, 99)``) when the headline trace's true peaks
+        matter (CV currents) and tightens for noisy derived signals.
+        """
         import numpy as np
         vals = []
         for c in cols:
@@ -374,11 +382,23 @@ class ResultsStep(BaseStep):
         vals = vals[np.isfinite(vals)]
         if vals.size < 2:
             return None
-        lo, hi = (float(v) for v in np.percentile(vals, [2, 98]))
+        lo, hi = (float(v) for v in np.percentile(vals, list(pct)))
         if include is not None:
             lo, hi = min(lo, float(include)), max(hi, float(include))
+        if hi <= lo:
+            return None
         pad = (hi - lo) * 0.1 or 1.0
         return (lo - pad, hi + pad)
+
+    def _with_ylim(self, plot, frame: pl.DataFrame, cols, *, pct=(2, 98)):
+        """Apply a robust y-range to a built overlay (no-op if it can't be set)."""
+        ylim = self._robust_ylim(frame, cols, pct=pct)
+        if ylim is None:
+            return plot
+        try:
+            return plot.opts(hv.opts.Overlay(ylim=ylim))
+        except Exception:
+            return plot
 
     def mpe_trend_plot(self, height: int = PLOT_HEIGHT):
         """MPE (plating + stripping) vs cycle number across runs, with M/z target."""
@@ -400,16 +420,28 @@ class ResultsStep(BaseStep):
             return pn.pane.Alert(f"MPE trend failed: {exc}", alert_type="danger")
 
     def ce_trend_plot(self, height: int = PLOT_HEIGHT):
-        """Coulombic efficiency (t_strip/t_plate × 100) vs cycle number across runs."""
+        """Coulombic efficiency vs cycle number across runs.
+
+        Reports charge-based CE = |Q_strip / Q_plate| × 100 — the standard
+        plating/stripping efficiency — and falls back to the time ratio
+        (t_strip / t_plate) only when no charge channel is present.
+        """
         try:
             frame = self._multi_augmented(filtered=False)
-            if frame.is_empty() or "CE_time" not in frame.columns:
+            if frame.is_empty():
                 return self.empty_state("Coulombic efficiency needs a CP run.")
-            frame = frame.with_columns((pl.col("CE_time") * 100.0).alias("CE_pct"))
-            ylim = self._robust_ylim(frame, ["CE_pct"])
+            if "CE_charge" in frame.columns and frame["CE_charge"].drop_nulls().len():
+                src, basis = "CE_charge", "charge"
+            elif "CE_time" in frame.columns:
+                src, basis = "CE_time", "time"
+            else:
+                return self.empty_state("Coulombic efficiency needs a CP run.")
+            frame = frame.with_columns((pl.col(src) * 100.0).alias("CE_pct"))
+            ylim = self._robust_ylim(frame, ["CE_pct"], include=100.0)
             plot = plots.cycle_trend(
                 frame, series=[("CE_pct", "CE", "x")],
-                ylabel="Coulombic Efficiency (%)", title="CE per cycle", ylim=ylim, height=height,
+                ylabel="Coulombic efficiency (%)",
+                title=f"CE per cycle ({basis}-based)", ylim=ylim, height=height,
             )
             return self.nearest_hover(self.force_plot_height(plot, height))
         except Exception as exc:  # pragma: no cover
@@ -459,15 +491,16 @@ class ResultsStep(BaseStep):
                     return self.empty_state("No cycles to overlay.")
                 frame = pl.concat(frames, how="diagonal_relaxed")
                 title = f"{q.label} per cycle · all runs{zsuffix}"
-                return self.nearest_hover(self.force_plot_height(
-                    plots.cycle_overlay_runs(frame, q, title, height=height), height))
+                plot = self._with_ylim(plots.cycle_overlay_runs(frame, q, title, height=height),
+                                       frame, ["value"])
+                return self.nearest_hover(self.force_plot_height(plot, height))
 
             rel = self._run_cycle_rel(self.data, state, q, zero)
             if rel.is_empty():
                 return self.empty_state("No cycles to overlay.")
             title = f"{q.label} per cycle{zsuffix}"
-            return self.nearest_hover(self.force_plot_height(
-                plots.cycle_overlay(rel, q, title, height=height), height))
+            plot = self._with_ylim(plots.cycle_overlay(rel, q, title, height=height), rel, ["value"])
+            return self.nearest_hover(self.force_plot_height(plot, height))
         except Exception as exc:  # pragma: no cover
             return pn.pane.Alert(f"Cycle overlay failed: {exc}", alert_type="danger")
 
@@ -514,9 +547,11 @@ class ResultsStep(BaseStep):
         try:
             if not self.data.has_echem():
                 return self.empty_state("No electrochemistry channel.")
+            cp = self._technique() == "cp"
+            ycol, ypct = (_E, (2, 98)) if cp else (_I, (1, 99))
             if self._is_multi():
                 frame = echem.overlay_selected_waveforms(self._named_waveforms(), **self._cycle_kwargs())
-                if self._technique() == "cp":
+                if cp:
                     plot = plots.echem_overlay(frame, _T, _E, _T_LABEL, _E_LABEL,
                                                "Potential vs time (CP) · all runs",
                                                by_cycle=False, monotonic=True, height=height)
@@ -524,35 +559,86 @@ class ResultsStep(BaseStep):
                     plot = plots.echem_overlay(frame, _E, _I, _E_LABEL, _I_LABEL,
                                                "Current vs potential (CV) · all runs",
                                                by_cycle=True, monotonic=False, height=height)
+                plot = self._with_ylim(plot, frame, [ycol], pct=ypct)
                 return self.nearest_hover(self.force_plot_height(plot, height))
             wf = self._selected_waveform()
-            if self._technique() == "cp":
+            if cp:
                 plot = plots.echem_curve(wf, _T, _E, _T_LABEL, _E_LABEL, "Potential vs time (CP)",
                                          by_cycle=False, monotonic=True, height=height, show_legend=False)
             else:
                 plot = plots.echem_curve(wf, _E, _I, _E_LABEL, _I_LABEL, "Current vs potential (CV)",
                                          by_cycle=True, monotonic=False, height=height,
                                          show_legend=self._has_cycles)
+            plot = self._with_ylim(plot, wf, [ycol], pct=ypct)
             return self.nearest_hover(self.force_plot_height(plot, height))
         except Exception as exc:  # pragma: no cover
             return pn.pane.Alert(f"Plot failed: {exc}", alert_type="danger")
 
+    def _mass_plot(self, x_key: str, height: int):
+        state = self.controls.state()
+        ax = axis(x_key)
+        q = quantity("sauerbrey_mass")
+        value_df, _ = self.data.value_df(state, "sauerbrey_mass", x_key)
+        plot = plots.analysis_timeline(
+            value_df, q, ax, state.groups, state.orders,
+            f"Mass vs {ax.label}",
+            annotation_spans=self.data.annotation_spans(state) if ax.is_time else None,
+            select_x=False, height=height,
+        )
+        plot = self._with_ylim(plot, value_df, ["value"])
+        return self.nearest_hover(self.force_plot_height(plot, height))
+
     def mass_vs_potential(self, height: int = PLOT_HEIGHT):
         try:
-            state = self.controls.state()
-            x_key = "potential" if self.data.has_echem() else "time"
-            ax = axis(x_key)
-            q = quantity("sauerbrey_mass")
-            value_df, _ = self.data.value_df(state, "sauerbrey_mass", x_key)
-            plot = plots.analysis_timeline(
-                value_df, q, ax, state.groups, state.orders,
-                f"Mass vs {ax.label}",
-                annotation_spans=self.data.annotation_spans(state) if ax.is_time else None,
-                select_x=False, height=height,
-            )
-            return self.nearest_hover(self.force_plot_height(plot, height))
+            # CP is galvanostatic (potential ≈ constant), so mass-vs-potential is
+            # meaningless there — plot mass vs charge (the capacity curve) instead.
+            if not self.data.has_echem():
+                x_key = "time"
+            elif self._technique() == "cp" and "charge" in self.data.run.columns:
+                x_key = "charge"
+            else:
+                x_key = "potential"
+            return self._mass_plot(x_key, height)
         except Exception as exc:  # pragma: no cover
             return pn.pane.Alert(f"Mass plot failed: {exc}", alert_type="danger")
+
+    def mass_vs_charge(self, height: int = PLOT_HEIGHT):
+        """Mass vs charge (Δm–Q). Its slope is the apparent molar mass per electron
+        (F·dm/dQ = M/z) — the standard quantitative EQCM check of Faraday's law."""
+        try:
+            x_key = "charge" if "charge" in self.data.run.columns else (
+                "potential" if self.data.has_echem() else "time")
+            return self._mass_plot(x_key, height)
+        except Exception as exc:  # pragma: no cover
+            return pn.pane.Alert(f"Mass-vs-charge plot failed: {exc}", alert_type="danger")
+
+    def potential_vs_capacity(self, height: int = PLOT_HEIGHT):
+        """CP voltage profile: potential vs charge (capacity) per cycle.
+
+        The standard galvanostatic plot — each cycle's plating/stripping plateau
+        read against passed charge. Replaces the current-density-vs-potential plot
+        for CP, where constant current and a near-flat potential make that plot a
+        meaningless blob.
+        """
+        try:
+            if not self.data.has_echem():
+                return self.empty_state("No electrochemistry channel.")
+            if self._is_multi():
+                frame = echem.overlay_selected_waveforms(self._named_waveforms(), **self._cycle_kwargs())
+                plot = plots.echem_overlay(frame, _Q, _E, _Q_LABEL, _E_LABEL,
+                                           "Voltage profile (potential vs charge) · all runs",
+                                           by_cycle=True, monotonic=False, height=height)
+                plot = self._with_ylim(plot, frame, [_E])
+                return self.nearest_hover(self.force_plot_height(plot, height))
+            wf = self._selected_waveform()
+            plot = plots.echem_curve(wf, _Q, _E, _Q_LABEL, _E_LABEL,
+                                     "Voltage profile (potential vs charge)",
+                                     by_cycle=True, monotonic=False, height=height,
+                                     show_legend=self._has_cycles)
+            plot = self._with_ylim(plot, wf, [_E])
+            return self.nearest_hover(self.force_plot_height(plot, height))
+        except Exception as exc:  # pragma: no cover
+            return pn.pane.Alert(f"Voltage profile failed: {exc}", alert_type="danger")
 
     def density_vs_potential(self, height: int = COMPACT_PLOT_HEIGHT):
         try:
@@ -566,14 +652,62 @@ class ResultsStep(BaseStep):
                 plot = plots.echem_overlay(frame, _E, _J, _E_LABEL, _J_LABEL,
                                            "Current density vs potential · all runs",
                                            by_cycle=True, monotonic=False, height=height)
+                plot = self._with_ylim(plot, frame, [_J], pct=(1, 99))
                 return self.nearest_hover(self.force_plot_height(plot, height))
             wf = self._selected_waveform()
             plot = plots.echem_curve(wf, _E, _J, _E_LABEL, _J_LABEL, "Current density vs potential",
                                      by_cycle=True, monotonic=False, height=height,
                                      show_legend=False)
+            plot = self._with_ylim(plot, wf, [_J], pct=(1, 99))
             return self.nearest_hover(self.force_plot_height(plot, height))
         except Exception as exc:  # pragma: no cover
             return pn.pane.Alert(f"Plot failed: {exc}", alert_type="danger")
+
+    # --- technique-aware layout -------------------------------------------
+    @staticmethod
+    def _results_card(body, title: str):
+        return pn.Card(body, title=title, collapsible=False, margin=0,
+                       sizing_mode="stretch_width", css_classes=["qcm-card"])
+
+    def _detail_plot_row(self, *_):
+        """The two detail plots, chosen by technique.
+
+        CV (the i–E experiment): mass-vs-potential + current-density-vs-potential.
+        CP (galvanostatic): mass-vs-charge (capacity) + the voltage profile —
+        the current-density-vs-potential plot is dropped because constant current
+        and a flat potential make it meaningless there.
+        """
+        if self._technique() == "cp":
+            left = self._results_card(self.mass_vs_potential(height=PLOT_HEIGHT),
+                                      "Mass vs charge (capacity)")
+            right = self._results_card(self.potential_vs_capacity(height=PLOT_HEIGHT),
+                                       "Voltage profile (potential vs charge)")
+        else:
+            # CV: mass-vs-potential (where deposition happens) and mass-vs-charge
+            # (slope = apparent molar mass M/z). Raw current-density-vs-potential
+            # is the area-scaled headline and is reachable on the Data page, so it
+            # isn't restated here.
+            left = self._results_card(self.mass_vs_potential(height=PLOT_HEIGHT),
+                                      "Mass vs potential")
+            right = self._results_card(self.mass_vs_charge(height=PLOT_HEIGHT),
+                                       "Mass vs charge (slope = M/z)")
+        return pn.Row(left, right, margin=0, sizing_mode="stretch_width",
+                      css_classes=["qcm-results-plotrow"])
+
+    def _trend_plot_row(self, *_):
+        """Per-cycle MPE + Coulombic-efficiency trends — CP only.
+
+        Both are plating/stripping (half-cycle) quantities with no meaning for a
+        CV sweep, so the row is hidden entirely off CP rather than showing two
+        empty 'needs a CP run' cards.
+        """
+        if self._technique() != "cp":
+            return pn.Spacer(height=0)
+        return pn.Row(
+            self._results_card(self.mpe_trend_plot(height=PLOT_HEIGHT), "MPE per cycle"),
+            self._results_card(self.ce_trend_plot(height=PLOT_HEIGHT), "Coulombic efficiency per cycle"),
+            margin=0, sizing_mode="stretch_width", css_classes=["qcm-results-plotrow"],
+        )
 
     # --- page surface ------------------------------------------------------
     def page(self):
@@ -621,23 +755,15 @@ class ResultsStep(BaseStep):
                 side,
                 margin=0, sizing_mode="stretch_width", css_classes=["qcm-results-midrow"],
             ),
-            pn.Row(
-                self.panel(lambda: self.mass_vs_potential(height=PLOT_HEIGHT), *sig, self.controls.plot_reset_version,
-                           title="Mass vs potential"),
-                self.panel(lambda: self.density_vs_potential(height=PLOT_HEIGHT), *sig, *cyc, rv, self.controls.plot_reset_version,
-                           title="Current density vs potential"),
-                margin=0, sizing_mode="stretch_width", css_classes=["qcm-results-plotrow"],
-            ),
+            # Detail plots adapt to the technique (CV: mass/J vs potential; CP:
+            # mass vs charge + voltage profile).
+            pn.bind(self._detail_plot_row, self.technique_select, *sig, *cyc, rv,
+                    self.controls.plot_reset_version),
             self.panel(lambda: self.cycle_overlay_plot(), *sig, *cyc, rv, self.controls.plot_reset_version,
                        title="Cycle overlay", controls=pn.Row(self.cycle_zero, margin=0)),
             self.panel(self.per_cycle_table, *sig, *cyc, rv, title="Per-cycle summary"),
-            # MPE / CE trends vs cycle (CP only — the plots self-gate for CV).
-            pn.Row(
-                self.panel(lambda: self.mpe_trend_plot(height=PLOT_HEIGHT), *sig, *cyc, rv,
-                           self.controls.plot_reset_version, title="MPE per cycle"),
-                self.panel(lambda: self.ce_trend_plot(height=PLOT_HEIGHT), *sig, *cyc, rv,
-                           self.controls.plot_reset_version, title="Coulombic efficiency per cycle"),
-                margin=0, sizing_mode="stretch_width", css_classes=["qcm-results-plotrow"],
-            ),
+            # Per-cycle MPE + Coulombic efficiency — shown for CP only.
+            pn.bind(self._trend_plot_row, self.technique_select, *sig, *cyc, rv,
+                    self.controls.plot_reset_version),
         ]
         return pn.Column(*rows, margin=0, sizing_mode="stretch_width", css_classes=["qcm-page-results"])

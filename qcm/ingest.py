@@ -241,6 +241,7 @@ def ingest(
     raw_part_rows: int = 1_000_000,
     memory_limit: str | None = "4GB",
     source_label: str | None = None,
+    extra_metadata: dict | None = None,
 ) -> Path:
     """Import parquet into an optimized run folder.
 
@@ -271,6 +272,17 @@ def ingest(
     (dest / "expressions.json").write_text("{}")
 
     has_raw = RAW_MARKER in cols
+    metadata = {
+        "rows": rows,
+        "raw_parts": len(list((dest / "raw").glob("*.parquet"))),
+        "raw_part_rows": int(raw_part_rows),
+        "rows_copied": rows_copied,
+        "optimized_for_large_files": True,
+        "has_raw": has_raw,
+        "raw_columns_present": [c for c in RAW_OPTIONAL if c in cols],
+    }
+    if extra_metadata:
+        metadata.update(extra_metadata)
     manifest = Manifest(
         run_id=dest.name,
         created_at=now_iso(),
@@ -280,15 +292,7 @@ def ingest(
         groups=[int(g) for g in groups],
         pyramid_levels=list(LEVELS.keys()),
         paths=PathsInfo(),
-        metadata={
-            "rows": rows,
-            "raw_parts": len(list((dest / "raw").glob("*.parquet"))),
-            "raw_part_rows": int(raw_part_rows),
-            "rows_copied": rows_copied,
-            "optimized_for_large_files": True,
-            "has_raw": has_raw,
-            "raw_columns_present": [c for c in RAW_OPTIONAL if c in cols],
-        },
+        metadata=metadata,
     )
     manifest.save(dest)
     return dest

@@ -17,7 +17,13 @@ from __future__ import annotations
 
 import polars as pl
 
-from .theme import ELECTRODE_AREA_CM2, FARADAY_CONSTANT
+from .theme import (
+    CHARGE_EPS_C,
+    CP_CURRENT_COV_THRESHOLD,
+    ELECTRODE_AREA_CM2,
+    FARADAY_CONSTANT,
+    NG_PER_CM2_TO_G,
+)
 
 _US = 1_000_000
 
@@ -67,7 +73,7 @@ def detect_technique(df: pl.DataFrame) -> str:
     if mean_abs <= 0:
         return "cv"
     cov = float(abs_i.std() or 0.0) / mean_abs
-    return "cp" if cov < 0.5 else "cv"
+    return "cp" if cov < CP_CURRENT_COV_THRESHOLD else "cv"
 
 
 def _scan_rate_v_per_s(wf: pl.DataFrame) -> float:
@@ -119,8 +125,12 @@ def _step_durations_s(wf: pl.DataFrame) -> list[float]:
     return [float(d) for d in per_step["dur"].drop_nulls().to_list() if d > 0]
 
 
-def cp_metadata(df: pl.DataFrame) -> dict[str, float]:
-    """Chronopotentiometry metadata: applied current/density, step durations."""
+def cp_metadata(df: pl.DataFrame, area: float = ELECTRODE_AREA_CM2) -> dict[str, float]:
+    """Chronopotentiometry metadata: applied current/density, step durations.
+
+    ``area`` (cm²) converts the applied current to a current density; pass the
+    run's configured electrode area so it matches the rest of the app.
+    """
     wf = waveform(df) if "time_s" not in df.columns else df
     if wf.is_empty() or "current" not in wf.columns:
         return {}
@@ -129,14 +139,14 @@ def cp_metadata(df: pl.DataFrame) -> dict[str, float]:
     median_step = sorted(durations)[len(durations) // 2] if durations else 0.0
     return {
         "applied_current": applied,
-        "applied_current_density": applied / ELECTRODE_AREA_CM2,
+        "applied_current_density": applied / area,
         "step_duration": float(median_step),
         "n_steps": float(len(durations)),
     }
 
 
-def metadata(df: pl.DataFrame, technique: str) -> dict:
-    return cp_metadata(df) if technique == "cp" else cv_metadata(df)
+def metadata(df: pl.DataFrame, technique: str, area: float = ELECTRODE_AREA_CM2) -> dict:
+    return cp_metadata(df, area) if technique == "cp" else cv_metadata(df)
 
 
 def derive_cycles(wf: pl.DataFrame) -> pl.DataFrame:
@@ -212,7 +222,7 @@ def _cp_cycle_ce(wf: pl.DataFrame) -> pl.DataFrame:
     )
     if "Q_plate_C" in per.columns:
         per = per.with_columns(
-            pl.when(pl.col("Q_plate_C").abs() > 1e-15)
+            pl.when(pl.col("Q_plate_C").abs() > CHARGE_EPS_C)
             .then((pl.col("Q_strip_C") / pl.col("Q_plate_C")).abs())
             .otherwise(None).alias("CE_charge"),
         )
@@ -236,8 +246,8 @@ def half_cycle_mpe(joined: pl.DataFrame, area: float = ELECTRODE_AREA_CM2) -> pl
     dq = (pl.col("charge").sort_by("timestamp").last()
           - pl.col("charge").sort_by("timestamp").first()).alias("_dq")
     mpe = (
-        pl.when(pl.col("_dq").abs() > 1e-15)
-        .then(-FARADAY_CONSTANT * (pl.col("_dm_ng") * area * 1e-9) / pl.col("_dq"))
+        pl.when(pl.col("_dq").abs() > CHARGE_EPS_C)
+        .then(-FARADAY_CONSTANT * (pl.col("_dm_ng") * area * NG_PER_CM2_TO_G) / pl.col("_dq"))
         .otherwise(None).round(2)
     )
     half = joined.group_by(["cycle", "_is_plate"]).agg([dm, dq]).with_columns(mpe.alias("_mpe"))

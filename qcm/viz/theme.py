@@ -51,13 +51,39 @@ FARADAY_CONSTANT = 96_485.332_12
 # Default working-electrode area: a disc of radius 0.6 cm (⌀ 12 mm), the standard
 # EQCM sensor geometry. A wrong area silently scales areal mass, MPE, and current
 # density, so the default matches the real cell rather than a bare 1 cm².
-ELECTRODE_AREA_CM2 = math.pi * 0.6 ** 2  # ≈ 1.1310 cm²
+ELECTRODE_DISC_RADIUS_CM = 0.6
+ELECTRODE_AREA_CM2 = math.pi * ELECTRODE_DISC_RADIUS_CM ** 2  # ≈ 1.1310 cm²
+
+# Default deposited species for mass-per-electron: zinc (the lab's reference system).
+DEFAULT_MOLAR_MASS_G_PER_MOL = 65.38
+DEFAULT_VALENCY = 2
+
+# Unit conversions used by the science layer.
+NG_PER_CM2_TO_G = 1e-9          # areal mass (ng/cm²) × area(cm²) × this → grams
+MM_PER_CM = 10.0               # cm → mm for the disc-diameter sanity cue
+
+# Numerical guards (kept here so every consumer uses the same tolerances).
+CHARGE_EPS_C = 1e-15           # |Δq| below this ⇒ MPE undefined (avoid /0)
+FREQ_EPS_HZ = 1e-12            # |Δf/n| below this ⇒ viscoelastic ratio undefined
+AREA_MIN_CM2 = 1e-6           # smallest meaningful electrode area
+
+# Technique auto-detection: galvanostatic CP holds |I| nearly constant, so a low
+# coefficient of variation marks CP; anything noisier/sign-changing reads as CV.
+CP_CURRENT_COV_THRESHOLD = 0.5
+
+# Mass-per-electron (MPE) display defaults. The dynamic MPE (Δf/ΔQ) spikes where
+# the charge barely moves, so clipping is on by default to a physically generous
+# band; smoothing is opt-in.
+MPE_CLIP_LO_DEFAULT = -100.0   # g/mol
+MPE_CLIP_HI_DEFAULT = 150.0    # g/mol
+MPE_SMOOTH_WINDOW_DEFAULT = 51 # Savitzky–Golay window (samples, auto-shrunk to odd ≤ n)
+MPE_SAVGOL_POLYORDER = 2
 
 
 def area_to_diameter_mm(area_cm2: float) -> float:
     """Diameter (mm) of the disc with this area — a sanity cue for the area field."""
     try:
-        return 2.0 * math.sqrt(max(0.0, float(area_cm2)) / math.pi) * 10.0
+        return 2.0 * math.sqrt(max(0.0, float(area_cm2)) / math.pi) * MM_PER_CM
     except (TypeError, ValueError):
         return 0.0
 
@@ -82,8 +108,8 @@ class ExperimentParams:
 
     area_cm2: float = ELECTRODE_AREA_CM2
     sensitivity: float = SAUERBREY_CONSTANT
-    molar_mass: float = 65.38   # zinc, the notebook's default species
-    valency: int = 2
+    molar_mass: float = DEFAULT_MOLAR_MASS_G_PER_MOL
+    valency: int = DEFAULT_VALENCY
 
     @property
     def target_mpe(self) -> float | None:

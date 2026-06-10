@@ -138,7 +138,7 @@ def test_multi_augmented_has_mpe_and_ce(tmp_path):
     from qcm.viz.app import QCMViewer
     src = "/tmp/real-echem-run"
     import os
-    if not os.path.isdir(src):
+    if not os.path.isfile(os.path.join(src, "manifest.json")):
         import pytest; pytest.skip("real CP run missing")
     d2 = tmp_path / "run2"
     shutil.copytree(src, d2)
@@ -151,7 +151,7 @@ def test_multi_augmented_has_mpe_and_ce(tmp_path):
 
 def test_time_window_for_x_cycle_number(tmp_path):
     import os
-    if not os.path.isdir("/tmp/real-echem-run"):
+    if not os.path.isfile("/tmp/real-echem-run/manifest.json"):
         import pytest; pytest.skip("real CP run missing")
     from qcm.viz.runset import load_run
     d = load_run("/tmp/real-echem-run")

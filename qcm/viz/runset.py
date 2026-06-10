@@ -59,6 +59,7 @@ def read_run_info(run: QCMRun) -> RunInfo:
         n_sweeps=n_sweeps,
         rows=run.manifest.metadata.get("rows", "?"),
         has_echem=echem.has_echem(run.columns),
+        columns=list(run.columns),
     )
 
 

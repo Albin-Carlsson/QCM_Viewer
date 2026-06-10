@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 
 import typer
 from rich.console import Console
@@ -10,7 +11,7 @@ from rich.table import Table
 
 from .demo import PRESETS, make_demo_data
 from .ingest import ingest
-from .profiles import import_run
+from .profiles import import_run, resolve_import_target
 from .run import open_run
 
 app = typer.Typer(help="QCM parquet viewer CLI")
@@ -105,6 +106,11 @@ def import_cmd(
         "--ps-offset",
         help="Seconds to shift the PS stream before interpolation (positive = PS later).",
     ),
+    cv_scan_rate: float | None = typer.Option(
+        None,
+        "--cv-scan-rate",
+        help="CV scan rate in V/s for a cyclic-voltammetry PS export (overrides the filename-parsed value).",
+    ),
     overwrite: bool = typer.Option(False, "--overwrite"),
     raw_part_rows: int = typer.Option(
         1_000_000,
@@ -128,6 +134,7 @@ def import_cmd(
         dest,
         ps_source=ps,
         ps_offset_s=ps_offset,
+        cv_scan_rate=cv_scan_rate,
         overwrite=overwrite,
         raw_part_rows=raw_part_rows,
         memory_limit=memory_limit,
@@ -191,14 +198,49 @@ def export_data(run_path: Path, output: Path, columns: list[str] = typer.Option(
     console.print(f"Exported: {out}")
 
 
-@app.command()
-def serve(run_path: list[Path] = typer.Argument(...), port: int = 5006, show: bool = True):
-    """Serve the viewer. Pass two or more run directories to overlay them."""
+def _serve_runs(run_dirs: list[Path], port: int, show: bool) -> None:
     cmd = [sys.executable, "-m", "panel", "serve", str(Path(__file__).parent / "panel_app.py"),
-           "--port", str(port), "--args", *[str(p) for p in run_path]]
+           "--port", str(port), "--args", *[str(p) for p in run_dirs]]
     if show:
         cmd.insert(cmd.index("--args"), "--show")
     raise typer.Exit(subprocess.call(cmd))
+
+
+@app.command()
+def view(
+    source: list[Path] = typer.Argument(..., help="Run folders, experiment folders, or instrument files."),
+    cv_scan_rate: float | None = typer.Option(
+        None, "--cv-scan-rate",
+        help="CV scan rate in V/s. Overrides the value parsed from the filename for cyclic-voltammetry runs.",
+    ),
+    port: int = 5006,
+    show: bool = True,
+):
+    """Open the viewer on anything — the easy one-step command.
+
+    Point it at an experiment folder, a QCM instrument file, a parquet, or an
+    already-ingested run. A sibling potentiostat ``*_PS.csv`` is paired
+    automatically, raw files are imported to a temporary run, and run folders
+    open directly. Pass several sources to overlay them; the browser opens.
+    """
+    run_dirs: list[Path] = []
+    for i, src in enumerate(source):
+        qcm_src, ps_src = resolve_import_target(src)
+        if qcm_src.is_dir() and (qcm_src / "manifest.json").exists():
+            run_dirs.append(qcm_src)
+            continue
+        dest = Path(tempfile.mkdtemp(prefix="qcm_view_")) / f"{qcm_src.stem}_{i}"
+        paired = f" + {ps_src.name}" if ps_src else ""
+        console.print(f"Importing {qcm_src.name}{paired} …")
+        import_run(qcm_src, dest, ps_source=ps_src, cv_scan_rate=cv_scan_rate)
+        run_dirs.append(dest)
+    _serve_runs(run_dirs, port, show)
+
+
+@app.command()
+def serve(run_path: list[Path] = typer.Argument(...), port: int = 5006, show: bool = True):
+    """Serve the viewer on already-ingested run directories (overlay if 2+)."""
+    _serve_runs(list(run_path), port, show)
 
 
 if __name__ == "__main__":
