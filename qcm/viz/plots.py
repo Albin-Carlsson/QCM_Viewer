@@ -380,6 +380,34 @@ def timeline(
     )
 
 
+def alignment_overlay(frame: pl.DataFrame, height: int = PLOT_HEIGHT):
+    """Normalized mass-rate vs −current on shared time, for the alignment check.
+
+    ``frame`` carries ``[t_s, rate_norm, neg_current_norm]`` (both scaled to a
+    comparable band by the caller). When the import alignment is right the two
+    envelopes pulse together; a visible horizontal shift is the PS offset.
+    """
+    if frame.is_empty():
+        return empty("No overlapping QCM/EC signal")
+    t = frame["t_s"].to_numpy()
+    curves = []
+    for col, label, color in (
+        ("rate_norm", "QCM mass rate (norm.)", ACCENT),
+        ("neg_current_norm", "−Current (norm.)", EVENT_COLOR),
+    ):
+        x, y = _decimate_xy(t, frame[col].to_numpy())
+        curves.append(hv.Curve((x, y), X_LABEL, "Normalized signal", label=label).opts(
+            color=color, line_width=1.2))
+    return hv.Overlay(curves).opts(
+        hv.opts.Overlay(
+            title="PS ↔ QCM alignment (signals should pulse together)",
+            height=height, responsive=True, legend_position="right", show_grid=True,
+            hooks=[_autohide_toolbar_hook, _legend_mute_hook],
+        ),
+        hv.opts.Curve(tools=["hover"]),
+    )
+
+
 def cycle_trend(
     frame: pl.DataFrame,
     *,

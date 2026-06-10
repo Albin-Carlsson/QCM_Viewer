@@ -22,7 +22,7 @@ import holoviews as hv
 import panel as pn
 import polars as pl
 
-from .. import echem, plots
+from .. import echem, plots, science
 from ..components import icon_stat, stat_grid
 from ..theme import (
     CHARGE_EPS_C,
@@ -169,8 +169,6 @@ class ResultsStep(BaseStep):
     def _sauerbrey_cell(self, state) -> str | None:
         """Validity tile: overtone collapse + viscoelastic ratio over the range."""
         try:
-            from .. import science
-
             check = science.sauerbrey_check(self.data.region_summary(state))
         except Exception:
             return None
@@ -551,6 +549,79 @@ class ResultsStep(BaseStep):
             return stats
         return self._augment_with_mpe(stats)
 
+    # --- alignment check -----------------------------------------------------
+    def _alignment_frame(self) -> pl.DataFrame:
+        """``[t_s, mass, current]`` on the QCM time base over the full run."""
+        if not self.data.has_echem():
+            return pl.DataFrame()
+        state = self.controls.state()
+        full = replace(state, t_range_s=(0.0, float(self.data.info.span_s)))
+        mdf, _ = self.data.value_df(full, "sauerbrey_mass", "time")
+        wf = self.data.echem_waveform()
+        if mdf.is_empty() or wf.is_empty() or _I not in wf.columns:
+            return pl.DataFrame()
+        mass = mdf.group_by("timestamp").agg(pl.col("value").mean().alias("mass"))
+        joined = (
+            wf.select(["timestamp", _I]).join(mass, on="timestamp", how="inner")
+            .sort("timestamp")
+        )
+        if joined.is_empty():
+            return joined
+        return joined.with_columns(
+            ((pl.col("timestamp") - self.data.info.t0_us) / 1e6).alias("t_s")
+        ).select(["t_s", "mass", pl.col(_I).alias("current")]).drop_nulls()
+
+    def alignment_check(self, height: int = COMPACT_PLOT_HEIGHT):
+        """Visual + cross-correlation check that the PS stream is aligned.
+
+        Faraday's law couples the mass rate to −current, so the two normalized
+        traces should pulse together; the lag estimate quantifies any residual
+        import offset and suggests the ``--ps-offset`` to fix it.
+        """
+        try:
+            import numpy as np
+
+            df = self._alignment_frame()
+            if df.is_empty() or df.height < 8:
+                return self.empty_state("Needs both a QCM mass signal and an EC current channel.")
+            t = df["t_s"].to_numpy()
+            mass = df["mass"].to_numpy()
+            cur = df["current"].to_numpy()
+            rate = np.gradient(mass, t)
+
+            def _norm(v: np.ndarray) -> np.ndarray:
+                lo, hi = np.nanpercentile(v, [2, 98])
+                half = max((hi - lo) / 2.0, 1e-12)
+                return np.clip((v - (lo + hi) / 2.0) / half, -1.5, 1.5)
+
+            frame = pl.DataFrame({
+                "t_s": t, "rate_norm": _norm(rate), "neg_current_norm": _norm(-cur),
+            })
+            plot = self.nearest_hover(self.force_plot_height(
+                plots.alignment_overlay(frame, height=height), height))
+
+            est = science.alignment_lag(df)
+            dt = float(np.median(np.diff(t))) if t.size > 1 else 0.0
+            if est is None or est["corr"] < 0.1:
+                msg = ("<b>Lag estimate:</b> not enough correlated signal — judge "
+                       "alignment visually from the overlay above.")
+                tone = "warning"
+            elif abs(est["lag_s"]) <= max(2 * dt, 1.0):
+                msg = (f"<b>Aligned.</b> Residual lag {est['lag_s']:+.1f} s "
+                       f"(within sampling resolution; correlation {est['corr']:.2f}).")
+                tone = "info"
+            else:
+                msg = (f"<b>Possible misalignment:</b> EC features arrive "
+                       f"{est['lag_s']:+.1f} s relative to the QCM response "
+                       f"(correlation {est['corr']:.2f}). Re-import with "
+                       f"<code>--ps-offset {-est['lag_s']:.1f}</code> to realign.")
+                tone = "warning"
+            readout = pn.pane.HTML(f"<div class='qcm-hint {tone}'>{msg}</div>",
+                                   margin=0, sizing_mode="stretch_width")
+            return pn.Column(plot, readout, margin=0, sizing_mode="stretch_width")
+        except Exception as exc:  # pragma: no cover
+            return pn.pane.Alert(f"Alignment check failed: {exc}", alert_type="danger")
+
     def per_cycle_table(self):
         try:
             if not self.data.has_echem():
@@ -804,6 +875,8 @@ class ResultsStep(BaseStep):
                     self.controls.plot_reset_version),
             self.panel(lambda: self.cycle_overlay_plot(), *sig, *cyc, rv, self.controls.plot_reset_version,
                        title="Cycle overlay", controls=pn.Row(self.cycle_zero, margin=0)),
+            self.panel(lambda: self.alignment_check(), *sig, rv,
+                       title="PS ↔ QCM alignment check", collapsible=True, collapsed=True),
             self.panel(self.per_cycle_table, *sig, *cyc, rv, title="Per-cycle summary",
                        controls=pn.Row(self.csv_download(self._per_cycle_frame, "per_cycle_summary.csv"),
                                        margin=0), controls_position="bottom"),

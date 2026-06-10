@@ -270,6 +270,53 @@ def despike(
     return out.group_by("group", maintain_order=True).map_groups(_despike_group)
 
 
+def alignment_lag(df: pl.DataFrame, *, max_lag_s: float = 30.0) -> dict | None:
+    """Estimate the PS↔QCM time offset from Faraday's law.
+
+    ``df`` carries ``[t_s, mass, current]`` on the QCM time base (the PS stream
+    was interpolated onto it at import). For an electrodeposition experiment the
+    areal-mass *rate* is proportional to −current, so the cross-correlation of
+    the two peaks at zero lag when the streams are aligned; the argmax lag is
+    the residual offset. Returns ``{"lag_s", "corr"}``; a positive ``lag_s``
+    means the EC features arrive *later* than the QCM response, so re-importing
+    with ``ps_offset_s = -lag_s`` realigns them. ``None`` when there is too
+    little overlapping signal to say.
+    """
+    import numpy as np
+
+    need = {"t_s", "mass", "current"}
+    if df is None or df.is_empty() or not need.issubset(df.columns):
+        return None
+    d = df.select(sorted(need)).drop_nulls().sort("t_s")
+    if d.height < 64:
+        return None
+    t = d["t_s"].to_numpy()
+    dt = float(np.median(np.diff(t)))
+    if not np.isfinite(dt) or dt <= 0:
+        return None
+    grid = np.arange(t[0], t[-1], dt)
+    if grid.size < 64:
+        return None
+    mass = np.interp(grid, t, d["mass"].to_numpy())
+    cur = np.interp(grid, t, d["current"].to_numpy())
+    rate = np.gradient(mass, dt)
+    x = rate - rate.mean()
+    y = -(cur - cur.mean())
+    sx, sy = x.std(), y.std()
+    if sx == 0 or sy == 0:
+        return None
+    x /= sx
+    y /= sy
+    max_lag = max(1, int(round(max_lag_s / dt)))
+    lags = np.arange(-max_lag, max_lag + 1)
+    corr = np.array([
+        np.dot(x[max(0, -k):x.size - max(0, k)], y[max(0, k):y.size - max(0, -k)])
+        for k in lags
+    ]) / grid.size
+    best = int(np.argmax(corr))
+    return {"lag_s": float(lags[best] * dt), "corr": float(corr[best])}
+
+
 def sauerbrey_check(summary: pl.DataFrame) -> dict | None:
     """Judge whether Sauerbrey mass is trustworthy over the analysed region.
 
