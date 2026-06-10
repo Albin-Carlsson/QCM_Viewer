@@ -6,6 +6,7 @@ from typing import Any
 
 from .theme import (
     DEFAULT_PARAMS,
+    DESPIKE_WINDOW_DEFAULT,
     MPE_CLIP_HI_DEFAULT,
     MPE_CLIP_LO_DEFAULT,
     MPE_SMOOTH_WINDOW_DEFAULT,
@@ -61,6 +62,9 @@ class ViewState:
     mpe_clip_lo: float = MPE_CLIP_LO_DEFAULT
     mpe_clip_hi: float = MPE_CLIP_HI_DEFAULT
     mpe_target_show: bool = True
+    # Hampel despike of resonance traces (applies to f/D/mass-family quantities).
+    despike: bool = False
+    despike_window: int = DESPIKE_WINDOW_DEFAULT
 
     def t_us(self, t0_us: int) -> tuple[int, int]:
         start, end = self.t_range_s

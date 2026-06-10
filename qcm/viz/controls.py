@@ -21,6 +21,7 @@ from .state import RunInfo, ViewState, parse_orders
 from .theme import (
     AREA_MIN_CM2,
     AXES,
+    DESPIKE_WINDOW_DEFAULT,
     MPE_CLIP_HI_DEFAULT,
     MPE_CLIP_LO_DEFAULT,
     MPE_SMOOTH_WINDOW_DEFAULT,
@@ -715,11 +716,19 @@ class ViewerControls:
         self.mpe_target_show = pn.widgets.Checkbox(
             name="Show target line (M / z)", value=bool(s.get("mpe_target_show", True)),
         )
+        self.despike = pn.widgets.Checkbox(
+            name="Despike (Hampel)", value=bool(s.get("despike", False)),
+        )
+        self.despike_window = pn.widgets.IntInput(
+            name="Despike window", value=int(s.get("despike_window", DESPIKE_WINDOW_DEFAULT)),
+            start=3, step=2, sizing_mode="stretch_width",
+        )
 
     @property
     def mpe_inputs(self) -> tuple:
         return (self.mpe_smooth, self.mpe_window, self.mpe_clip,
-                self.mpe_clip_lo, self.mpe_clip_hi, self.mpe_target_show)
+                self.mpe_clip_lo, self.mpe_clip_hi, self.mpe_target_show,
+                self.despike, self.despike_window)
 
     def overtone_orders_panel(self) -> pn.viewable.Viewable:
         """Editable overtone-order map (n per channel).
@@ -751,6 +760,22 @@ class ViewerControls:
             sizing_mode="stretch_width", css_classes=["mpe-display"],
         )
 
+    def signal_cleanup_panel(self) -> pn.viewable.Viewable:
+        """Despike controls for the resonance traces (f, D, mass, MPE).
+
+        Hampel: only points deviating > 5 robust sigmas from the local rolling
+        median are replaced with that median, so steps and real transitions
+        survive while relay/bubble spikes vanish.
+        """
+        return pn.Card(
+            pn.pane.HTML("<small>Removes isolated spikes from the QCM traces "
+                         "(relay switching, bubbles). Electrochemistry channels "
+                         "are never modified.</small>", margin=0),
+            self.despike, self.despike_window,
+            title="Signal cleanup", collapsible=True, collapsed=True, margin=0,
+            sizing_mode="stretch_width", css_classes=["signal-cleanup"],
+        )
+
     def state(self) -> ViewState:
         # The sliders are the canonical source of truth; numeric inputs are kept
         # synchronized with them and are included in ``signal_inputs`` only to
@@ -777,6 +802,8 @@ class ViewerControls:
             mpe_clip_lo=self._safe_float(self.mpe_clip_lo.value, MPE_CLIP_LO_DEFAULT),
             mpe_clip_hi=self._safe_float(self.mpe_clip_hi.value, MPE_CLIP_HI_DEFAULT),
             mpe_target_show=bool(self.mpe_target_show.value),
+            despike=bool(self.despike.value),
+            despike_window=int(self.despike_window.value or DESPIKE_WINDOW_DEFAULT),
         )
 
     def _safe_float(self, value, fallback: float) -> float:

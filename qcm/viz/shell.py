@@ -590,6 +590,7 @@ class ViewerShell:
             self._rail_live_stats(),
             self.controls.experiment_params_panel(),
             self.controls.overtone_orders_panel(),
+            self.controls.signal_cleanup_panel(),
             self.controls.mpe_display_panel(),
             margin=0, sizing_mode="stretch_width", css_classes=["qcm-rail"],
         )

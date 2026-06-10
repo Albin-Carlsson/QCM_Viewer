@@ -84,6 +84,10 @@ class QCMViewData:
             base_means = self._baseline_mean(science.raw_value_sql(q), b0, b1, groups)
         out = science.compute(main, key, state.orders, baseline_means_df=base_means,
                               params=getattr(state, "params", None))
+        # Despike resonance-derived traces (spikes originate in the resonance
+        # fit, so cell-level echem channels are left untouched).
+        if getattr(state, "despike", False) and (q.is_resonance or q.kind == "mpe"):
+            out = science.despike(out, window=getattr(state, "despike_window", 7))
         if key == "mpe":
             clip = ((state.mpe_clip_lo, state.mpe_clip_hi)
                     if getattr(state, "mpe_clip", False) else None)

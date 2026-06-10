@@ -16,6 +16,8 @@ import polars as pl
 from .theme import (
     CHARGE_EPS_C,
     DEFAULT_PARAMS,
+    DESPIKE_THRESHOLD_SIGMA,
+    DESPIKE_WINDOW_DEFAULT,
     DISSIPATION_SCALE,
     FARADAY_CONSTANT,
     FREQ_EPS_HZ,
@@ -205,6 +207,67 @@ def smooth_clip_mpe(
         return df
 
     return out.group_by("group", maintain_order=True).map_groups(_smooth_group)
+
+
+def despike(
+    value_df: pl.DataFrame,
+    *,
+    window: int = DESPIKE_WINDOW_DEFAULT,
+    threshold: float = DESPIKE_THRESHOLD_SIGMA,
+) -> pl.DataFrame:
+    """Hampel filter on ``value`` per group: replace isolated spikes with the
+    rolling median.
+
+    A point is a spike when it deviates from the centred rolling median by more
+    than ``threshold`` robust sigmas (MAD × 1.4826) of its window. Only those
+    points are touched, so steps and genuine transitions survive — unlike a
+    plain median filter or Savgol smooth, which blur everything. Input/return
+    frames carry ``timestamp, group, value`` (extra columns preserved).
+    """
+    if value_df.is_empty() or "value" not in value_df.columns:
+        return value_df
+    w = max(3, int(window))
+    if w % 2 == 0:
+        w += 1
+
+    import numpy as np
+
+    out = value_df.sort(["group", "timestamp"]) if "group" in value_df.columns else value_df.sort("timestamp")
+
+    def _despike_group(df: pl.DataFrame) -> pl.DataFrame:
+        y = df["value"].to_numpy().astype(float)
+        n = y.size
+        if n < w:
+            return df
+        med = (
+            pl.Series(y)
+            .rolling_median(window_size=w, min_samples=1, center=True)
+            .to_numpy()
+        )
+        dev = np.abs(y - med)
+        mad = (
+            pl.Series(dev)
+            .rolling_median(window_size=w, min_samples=1, center=True)
+            .to_numpy()
+        )
+        sigma = 1.4826 * mad
+        # A locally-constant window has sigma 0; soften with the trace-typical
+        # sigma, and where the whole trace is constant treat any deviation from
+        # the local median as a spike.
+        floor = np.nanmedian(sigma[sigma > 0]) if np.any(sigma > 0) else 0.0
+        sigma = np.where(sigma > 0, sigma, floor)
+        with np.errstate(invalid="ignore"):
+            spikes = np.where(sigma > 0, dev > threshold * sigma, dev > 0)
+            spikes &= np.isfinite(dev)
+        if not spikes.any():
+            return df
+        fixed = y.copy()
+        fixed[spikes] = med[spikes]
+        return df.with_columns(pl.Series("value", fixed).fill_nan(None))
+
+    if "group" not in out.columns:
+        return _despike_group(out)
+    return out.group_by("group", maintain_order=True).map_groups(_despike_group)
 
 
 def summary_stats(value_df: pl.DataFrame) -> pl.DataFrame:

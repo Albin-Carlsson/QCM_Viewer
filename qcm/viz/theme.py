@@ -78,6 +78,10 @@ MPE_CLIP_LO_DEFAULT = -100.0   # g/mol
 MPE_CLIP_HI_DEFAULT = 150.0    # g/mol
 MPE_SMOOTH_WINDOW_DEFAULT = 51 # Savitzky–Golay window (samples, auto-shrunk to odd ≤ n)
 MPE_SAVGOL_POLYORDER = 2
+# Hampel despike of the resonance traces (f/D spikes from relay switching,
+# bubbles, brief fit glitches). Threshold is in robust sigmas (MAD-scaled).
+DESPIKE_WINDOW_DEFAULT = 7
+DESPIKE_THRESHOLD_SIGMA = 5.0
 
 
 def area_to_diameter_mm(area_cm2: float) -> float:
