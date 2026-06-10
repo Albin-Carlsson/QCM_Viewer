@@ -204,6 +204,18 @@ class ViewerControls:
                 sizing_mode="stretch_width",
             )
 
+        # The 3×N overtone checkboxes funnel into ONE reactive trigger. Binding
+        # the checkboxes directly would rebuild the hero (and every other bound
+        # panel) once per checkbox event — the "All" buttons set N values in a
+        # loop, which used to mean N sequential full-figure rebuilds shipped to
+        # the browser (~20 s for 7 channels). The version widget makes a single
+        # click one rebuild and lets the All buttons batch to one.
+        self.overtone_version = pn.widgets.IntInput(value=0, visible=False)
+        self._suspend_overtone_bump = False
+        for col in (self.overtone_frequency, self.overtone_dissipation, self.overtone_normalize):
+            for cb in col.values():
+                cb.param.watch(self._bump_overtone_version, "value")
+
         current_default = self._clean_range(self.saved.get("t_range_s", [0.0, self.info.span_s]))
         reference_default = self._clean_range(
             self.saved.get("baseline_s", [0.0, min(self.info.span_s, self.info.span_s * 0.1)])
@@ -555,14 +567,8 @@ class ViewerControls:
 
     @property
     def overtone_signal_inputs(self) -> tuple:
-        widgets = []
-        for g in self.info.groups:
-            widgets.extend([
-                self.overtone_frequency[g],
-                self.overtone_dissipation[g],
-                self.overtone_normalize[g],
-            ])
-        return tuple(widgets)
+        # One funnel widget, not the 3×N checkboxes — see _bump_overtone_version.
+        return (self.overtone_version,)
 
     @property
     def explore_inputs(self) -> tuple:
@@ -609,11 +615,21 @@ class ViewerControls:
             return self.overtone_normalize
         raise ValueError(f"Unknown overtone control column: {column}")
 
+    def _bump_overtone_version(self, _event=None) -> None:
+        if not self._suspend_overtone_bump:
+            self.overtone_version.value += 1
+
     def toggle_overtone_column(self, column: str) -> None:
+        """Set a whole checkbox column at once, firing a single rebuild."""
         controls = self._overtone_column(column)
         target = not all(bool(widget.value) for widget in controls.values())
-        for widget in controls.values():
-            widget.value = target
+        self._suspend_overtone_bump = True
+        try:
+            for widget in controls.values():
+                widget.value = target
+        finally:
+            self._suspend_overtone_bump = False
+        self._bump_overtone_version()
 
     def overtone_controls_state(self) -> dict[str, dict[str, bool]]:
         return {
