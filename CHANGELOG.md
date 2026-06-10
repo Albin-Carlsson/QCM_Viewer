@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Sensor/cell presets** (Phase 1): named presets bundling the experiment
+  parameters (electrode area, Sauerbrey sensitivity, molar mass M, valency z,
+  reference electrode), persisted globally at `~/.qcm_viewer/presets.json`
+  (override `QCM_PRESETS_FILE`). Load/save/delete from the Experiment parameters
+  card so a cell is configured once and reused on every run.
 - **Reference-electrode metadata** (Phase 1): a per-run `reference_electrode`
   experiment parameter that annotates every potential axis ("Potential
   [V vs Ag|AgCl]") across the Data hero, the E(t) strip, the Results echem plots

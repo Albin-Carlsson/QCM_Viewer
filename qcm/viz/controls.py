@@ -17,6 +17,7 @@ from typing import Literal
 
 import panel as pn
 
+from . import presets as presets_store
 from .state import RunInfo, ViewState, parse_orders
 from .theme import (
     AREA_MIN_CM2,
@@ -729,8 +730,12 @@ class ViewerControls:
         # Reference electrode is display-only metadata (it scales nothing) but a
         # potential is ambiguous without it, so it annotates every potential axis.
         self.param_reference_electrode = pn.widgets.TextInput(
-            label="Reference electrode", value=p.reference_electrode,
-            placeholder="e.g. Ag|AgCl, SCE", sizing_mode="stretch_width",
+            label="Reference electrode (for documentation)", value=p.reference_electrode,
+            placeholder="e.g. Ag|AgCl, SCE",
+            description="Display only: labels every potential axis as 'V vs …', and "
+                        "appears in Run info and the report. It does not rescale or "
+                        "convert any values.",
+            sizing_mode="stretch_width",
         )
         # Faraday's-law predicted Δf/n / mass overlay (needs a charge channel).
         self.faraday_show = pn.widgets.Checkbox(
@@ -748,6 +753,69 @@ class ViewerControls:
             sizing_mode="stretch_width",
         )
         self.param_f0_apply.on_click(self._apply_sensitivity_from_f0)
+
+        # Named presets: configure a sensor/cell once and reuse it on every run.
+        self.preset_select = pn.widgets.Select(
+            label="Load preset", options=self._preset_options(),
+            value="__none__", sizing_mode="stretch_width",
+            description="Apply a saved sensor/cell preset (area, sensitivity, M, z, "
+                        "reference electrode) to the fields below.",
+        )
+        self.preset_name = pn.widgets.TextInput(
+            label="", placeholder="Name this preset…", sizing_mode="stretch_width",
+        )
+        self.preset_save = pn.widgets.Button(
+            label="Save preset", button_type="default", icon="device-floppy",
+            sizing_mode="stretch_width",
+        )
+        self.preset_delete = pn.widgets.Button(
+            label="", button_type="default", icon="trash", width=44,
+            description="Delete the selected preset.",
+        )
+        self.preset_select.param.watch(self._apply_preset, "value")
+        self.preset_save.on_click(self._save_preset)
+        self.preset_delete.on_click(self._delete_preset)
+
+    # --- presets ----------------------------------------------------------
+    def _preset_options(self) -> dict:
+        """Select options: a 'none' sentinel plus every saved preset name."""
+        opts = {"Presets…": "__none__"}
+        opts.update({name: name for name in sorted(presets_store.load_presets())})
+        return opts
+
+    def _refresh_preset_options(self, select: str = "__none__") -> None:
+        self.preset_select.options = self._preset_options()
+        if select in self.preset_select.options.values():
+            self.preset_select.value = select
+
+    def _apply_preset(self, event=None) -> None:
+        """Copy a preset's values into the editable parameter fields."""
+        name = self.preset_select.value
+        if not name or name == "__none__":
+            return
+        preset = presets_store.load_presets().get(name)
+        if preset is None:
+            return
+        self.param_area.value = preset.area_cm2
+        self.param_sensitivity.value = preset.sensitivity
+        self.param_molar_mass.value = preset.molar_mass
+        self.param_valency.value = int(preset.valency)
+        self.param_reference_electrode.value = preset.reference_electrode
+
+    def _save_preset(self, _event=None) -> None:
+        name = (self.preset_name.value or "").strip()
+        if not name:
+            return
+        presets_store.save_preset(name, self.params())
+        self.preset_name.value = ""
+        self._refresh_preset_options(select=name)
+
+    def _delete_preset(self, _event=None) -> None:
+        name = self.preset_select.value
+        if not name or name == "__none__":
+            return
+        presets_store.delete_preset(name)
+        self._refresh_preset_options()
 
     def _apply_sensitivity_from_f0(self, _event=None) -> None:
         try:
@@ -785,7 +853,17 @@ class ViewerControls:
             return pn.pane.HTML(
                 f"<div class='param-geom'>= ⌀ {d_mm:.1f} mm disc</div>", margin=0,
             )
+        # Preset bar: load a saved sensor/cell, or name + save the current values.
+        preset_bar = pn.Column(
+            pn.Row(self.preset_select, self.preset_delete, margin=0,
+                   sizing_mode="stretch_width"),
+            pn.Row(self.preset_name, self.preset_save, margin=0,
+                   sizing_mode="stretch_width"),
+            margin=0, sizing_mode="stretch_width", css_classes=["qcm-preset-bar"],
+        )
         return pn.Card(
+            preset_bar,
+            pn.layout.Divider(margin=(6, 0)),
             self.param_area, pn.bind(geom, self.param_area),
             self.param_sensitivity,
             # Stacked, not side-by-side: a Row of two stretch widgets overflows
