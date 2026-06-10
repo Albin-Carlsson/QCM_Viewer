@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Auto-suggested baseline** (Phase 1): a "Suggest stable window" button on the
+  Reference range card finds the flattest stretch near the run start (minimum
+  variance of the resonance signal, `science.stablest_window`) and fills the
+  reference range with it — a suggestion the user can accept or nudge, never
+  applied silently.
 - **Sensor/cell presets** (Phase 1): named presets bundling the experiment
   parameters (electrode area, Sauerbrey sensitivity, molar mass M, valency z,
   reference electrode), persisted globally at `~/.qcm_viewer/presets.json`

@@ -302,6 +302,16 @@ class ViewerControls:
             sizing_mode="stretch_width",
         )
         self.baseline_full_range_button.on_click(self.set_full_reference_range)
+        # Auto-suggest a quiet reference window (wired in ViewerActions, which has
+        # the data). A suggestion the user can accept or nudge — never silent.
+        self.suggest_baseline_button = pn.widgets.Button(
+            label="Suggest stable window",
+            button_type="default",
+            icon="wand",
+            sizing_mode="stretch_width",
+            description="Find the flattest stretch near the start of the run and "
+                        "fill the reference range with it. You can still adjust it.",
+        )
 
         self.mark_range = pn.widgets.RangeSlider(
             label="Mark window (s)",
@@ -1276,6 +1286,8 @@ class ViewerControls:
         if with_slider:
             children.append(self.baseline_range)
         children.append(self._number_row("reference"))
+        children.append(pn.Row(self.suggest_baseline_button, margin=0,
+                               sizing_mode="stretch_width", css_classes=["range-actions"]))
         return pn.Card(
             *children,
             title="Reference range",

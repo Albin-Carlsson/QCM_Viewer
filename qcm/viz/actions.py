@@ -3,7 +3,11 @@ from __future__ import annotations
 
 import io
 import tempfile
+from dataclasses import replace
 
+import polars as pl
+
+from . import science
 from .controls import ViewerControls
 from .data import QCMViewData
 from .design import ACCENT_BUTTON_STYLESHEET
@@ -32,6 +36,7 @@ class ViewerActions:
         self.controls.save_state_button.on_click(self.save_state)
         self.controls.use_selection_as_baseline.on_click(self.sync_baseline_to_selection)
         self.controls.revert_baseline.on_click(self.revert_baseline)
+        self.controls.suggest_baseline_button.on_click(self.suggest_baseline)
 
     def _build_exports(self) -> None:
         import panel as pn
@@ -174,6 +179,47 @@ class ViewerActions:
             "Current range was not moved or saved.",
             "success",
         )
+
+    def suggest_baseline(self, _event=None) -> None:
+        """Fill the reference range with the flattest stretch near the run start.
+
+        Reads the absolute resonance frequency over the whole run (its local
+        variance measures stability regardless of any baseline), finds the
+        quietest window in the first part of the run, and proposes it as the
+        reference range. It is a suggestion: the user can accept or nudge it.
+        """
+        try:
+            span = float(self.info.span_s)
+            if span <= 0:
+                self.notify("Run has no time span to search.", "warning")
+                return
+            state = self.controls.state()
+            full = replace(state, t_range_s=(0.0, span))
+            vdf, _ = self.data.value_df(full, "fit_center", "time")
+            if vdf.is_empty() or "value" not in vdf.columns:
+                self.notify("No resonance signal to find a stable window from.", "warning")
+                return
+            agg = (vdf.group_by("timestamp").agg(pl.col("value").mean().alias("v"))
+                   .sort("timestamp"))
+            t = (agg["timestamp"].to_numpy() - self.info.t0_us) / _US
+            # A baseline is a short quiet stretch early in the run: search the
+            # first ~40 %, with a window ~5 % of the run (min 1 s).
+            width_s = min(max(span * 0.05, 1.0), span)
+            window = science.stablest_window(
+                t, agg["v"].to_numpy(), width_s=width_s, search_end_s=span * 0.4,
+            )
+            if window is None:
+                self.notify("Couldn't find a stable window automatically — set it by hand.", "warning")
+                return
+            lo, hi = window
+            self.controls.set_reference_range_values(lo, hi)
+            self.notify(
+                f"Suggested reference range {lo:,.2f}–{hi:,.2f} s "
+                "(flattest early stretch). Adjust if needed.",
+                "success",
+            )
+        except Exception as exc:
+            self.notify(f"Baseline suggestion failed: {exc}", "error")
 
     def revert_baseline(self, _event=None) -> None:
         if self.controls._last_baseline is None:

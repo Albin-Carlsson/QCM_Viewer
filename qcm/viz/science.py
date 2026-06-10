@@ -272,6 +272,57 @@ def despike(
     return out.group_by("group", maintain_order=True).map_groups(_despike_group)
 
 
+def stablest_window(
+    t_s,
+    y,
+    *,
+    width_s: float,
+    search_end_s: float | None = None,
+    n_positions: int = 240,
+    min_points: int = 8,
+) -> tuple[float, float] | None:
+    """The ``width_s``-wide window whose signal is flattest (lowest variance).
+
+    A QCM baseline/reference window should be a quiet stretch before anything
+    happens — buffer flowing, no adsorption — where Δf and ΔD are flat. Sliding a
+    fixed-width window across the run and taking the minimum-variance position
+    finds that stretch automatically. ``search_end_s`` caps how far in to look
+    (baselines sit early, so the default search is the caller's choice); the
+    result is a *suggestion* the user can accept or nudge, never silently applied.
+
+    ``t_s`` / ``y`` are elapsed seconds and a frequency-like signal (e.g. absolute
+    resonance frequency — its local variance measures stability independent of
+    any baseline). Returns ``(start_s, end_s)`` or ``None`` when there is too
+    little data.
+    """
+    import numpy as np
+
+    t = np.asarray(t_s, dtype=float)
+    y = np.asarray(y, dtype=float)
+    mask = np.isfinite(t) & np.isfinite(y)
+    t, y = t[mask], y[mask]
+    if t.size < min_points or width_s <= 0:
+        return None
+    order = np.argsort(t)
+    t, y = t[order], y[order]
+    t0 = float(t[0])
+    t_last = float(t[-1])
+    end_limit = t_last if search_end_s is None else min(float(search_end_s), t_last)
+    max_start = max(end_limit - width_s, t0)
+    starts = np.linspace(t0, max_start, num=max(1, int(n_positions)))
+    best: tuple[float, float] | None = None
+    best_var: float | None = None
+    for s in starts:
+        e = s + width_s
+        sel = (t >= s) & (t <= e)
+        if int(sel.sum()) < min_points:
+            continue
+        var = float(np.var(y[sel]))
+        if best_var is None or var < best_var:
+            best_var, best = var, (float(s), float(e))
+    return best
+
+
 def alignment_lag(df: pl.DataFrame, *, max_lag_s: float = ALIGNMENT_MAX_LAG_S) -> dict | None:
     """Estimate the PS↔QCM time offset from Faraday's law.
 
