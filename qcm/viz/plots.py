@@ -20,6 +20,7 @@ from .theme import (
     EVENT_COLOR,
     HERO_HEIGHT,
     MAX_PLOT_POINTS,
+    MAX_PLOTTED_CYCLES,
     PLOT_HEIGHT,
     COMPACT_PLOT_HEIGHT,
     SWEEP_PANEL_HEIGHT,
@@ -88,11 +89,12 @@ def _xy(value_df: pl.DataFrame, group: int, max_points: int = MAX_PLOT_POINTS):
 
 
 def _legend_mute_hook(plot, _element):
-    """Click a legend entry to mute/unmute its trace and hover target.
+    """Click a legend entry to hide/show its trace and hover target.
 
-    Bokeh's legend ``mute`` policy only changes renderer opacity. HoverTool
-    still includes muted renderers unless we explicitly keep its renderer list
-    in sync with the active legend entries.
+    The ``hide`` policy is fully client-side: toggling a trace costs zero
+    server round-trips, which makes the legend the *fast* visibility control
+    (the Signals checkboxes remain the persistent one — they re-render). Hover
+    renderer lists are kept in sync so hidden traces stop answering hovers.
     """
     try:
         from bokeh.models import CustomJS, HoverTool
@@ -101,7 +103,7 @@ def _legend_mute_hook(plot, _element):
         hover_renderers = []
         seen = set()
         for legend in plot.state.legend:
-            legend.click_policy = "mute"
+            legend.click_policy = "hide"
             legend.label_text_font_size = "9pt"
             for item in legend.items:
                 for renderer in item.renderers:
@@ -483,10 +485,13 @@ def cycle_overlay_runs(frame: pl.DataFrame, q: Quantity, title: str, height: int
     if frame.is_empty() or "t_rel_s" not in frame.columns or "run_slot" not in frame.columns:
         return empty("No cycle data in selection")
     curves: list = []
+    max_total = 0
     for slot in sorted(int(s) for s in frame["run_slot"].unique().to_list()):
         sub_run = frame.filter(pl.col("run_slot") == slot)
         label = str(sub_run["run"][0])
         cycles = sorted(int(c) for c in sub_run["cycle"].unique().drop_nulls().to_list())
+        max_total = max(max_total, len(cycles))
+        cycles, _ = _thin_cycles(cycles)
         multi = len(cycles) > 1
         for cslot, c in enumerate(cycles):
             sub = sub_run.filter(pl.col("cycle") == c).sort("t_rel_s").drop_nulls(["t_rel_s", "value"])
@@ -501,6 +506,8 @@ def cycle_overlay_runs(frame: pl.DataFrame, q: Quantity, title: str, height: int
             )
     if not curves:
         return empty("No cycle data in selection")
+    if max_total > MAX_PLOTTED_CYCLES:
+        title = _thinned_title(title, MAX_PLOTTED_CYCLES, max_total)
     return hv.Overlay(curves).opts(
         hv.opts.Overlay(
             title=title, height=height, responsive=True, legend_position="right",
@@ -554,6 +561,10 @@ def cycle_overlay(frame: pl.DataFrame, q: Quantity, title: str, height: int = PL
     if frame.is_empty() or "t_rel_s" not in frame.columns or "value" not in frame.columns:
         return empty("No cycle data in selection")
     cycles = sorted(int(c) for c in frame["cycle"].unique().drop_nulls().to_list())
+    total = len(cycles)
+    cycles, thinned = _thin_cycles(cycles)
+    if thinned:
+        title = _thinned_title(title, len(cycles), total)
     curves = []
     for slot, c in enumerate(cycles):
         sub = frame.filter(pl.col("cycle") == c).sort("t_rel_s").drop_nulls(["t_rel_s", "value"])
@@ -953,6 +964,19 @@ def df_fingerprint(norm_df: pl.DataFrame, d_df: pl.DataFrame, groups: list[int],
     )
 
 
+def _thin_cycles(cycles: list[int]) -> tuple[list[int], bool]:
+    """Evenly spaced subset (incl. first & last) when there are too many cycles
+    to read as individual traces. Returns ``(cycles, was_thinned)``."""
+    if len(cycles) <= MAX_PLOTTED_CYCLES:
+        return cycles, False
+    idx = np.unique(np.linspace(0, len(cycles) - 1, MAX_PLOTTED_CYCLES).round().astype(int))
+    return [cycles[i] for i in idx], True
+
+
+def _thinned_title(title: str, shown: int, total: int) -> str:
+    return f"{title} · showing {shown} of {total} cycles"
+
+
 def echem_curve(
     wf: pl.DataFrame,
     xcol: str,
@@ -989,6 +1013,10 @@ def echem_curve(
     curves: list = []
     if by_cycle and "cycle" in wf.columns:
         cycles = sorted(int(c) for c in wf["cycle"].unique().drop_nulls().to_list())
+        total = len(cycles)
+        cycles, thinned = _thin_cycles(cycles)
+        if thinned:
+            title = _thinned_title(title, len(cycles), total)
         for slot, cyc in enumerate(cycles):
             sub = wf.filter(pl.col("cycle") == cyc).sort(sort_col).drop_nulls([xcol, ycol])
             if sub.is_empty():
@@ -1061,11 +1089,14 @@ def echem_overlay(
         return x, y
 
     curves: list = []
+    any_thinned = 0
     for slot in sorted(int(s) for s in frame["run_slot"].unique().to_list()):
         sub_run = frame.filter(pl.col("run_slot") == slot)
         label = str(sub_run["run"][0])
         if by_cycle and "cycle" in sub_run.columns:
             cycles = sorted(int(c) for c in sub_run["cycle"].unique().drop_nulls().to_list())
+            any_thinned = max(any_thinned, len(cycles))
+            cycles, _ = _thin_cycles(cycles)
             multi = len(cycles) > 1
             for cslot, cyc in enumerate(cycles):
                 sub = sub_run.filter(pl.col("cycle") == cyc).sort(sort_col).drop_nulls([xcol, ycol])
@@ -1094,6 +1125,8 @@ def echem_overlay(
 
     if not curves:
         return empty(f"No {ylabel} data")
+    if by_cycle and any_thinned > MAX_PLOTTED_CYCLES:
+        title = _thinned_title(title, MAX_PLOTTED_CYCLES, any_thinned)
     hooks = [_legend_mute_hook]
     if monotonic:
         hooks.insert(0, _vline_hover_hook)

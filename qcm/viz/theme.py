@@ -89,6 +89,18 @@ MAD_TO_SIGMA = 1.4826
 # offsets are a few seconds; beyond ±30 s the correlation peak is more likely
 # a cycle-period alias than a true offset.
 ALIGNMENT_MAX_LAG_S = 30.0
+# Most cycles drawn as individual traces in a per-cycle echem plot. A long
+# cycling run ("All" cycles) has hundreds; drawing each is unreadable spaghetti
+# and slow, so an evenly spaced subset (always incl. first/last) represents the
+# evolution. Explicit cycle/range selection is never thinned.
+MAX_PLOTTED_CYCLES = 12
+
+# Overtones shown by default on a fresh run. QCM-D practice reads n = 3, 5, 7:
+# the fundamental couples to mounting/liquid artifacts and the high overtones
+# mostly restate the middle ones (see the reference notebook, which plots
+# exactly these three). Everything stays one click away in the channels list.
+DEFAULT_VISIBLE_OVERTONES = (3, 5, 7)
+
 # Sauerbrey validity rules of thumb. The film counts as rigid when
 # ΔD/(−Δf/n) ≲ 4×10⁻⁷ Hz⁻¹ (Reviakine et al., Anal. Chem. 2011) — 0.4 in the
 # viewer's ×10⁻⁶-per-Hz units — and the overtones should tell the same story:

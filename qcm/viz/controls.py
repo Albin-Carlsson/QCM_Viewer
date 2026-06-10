@@ -21,6 +21,7 @@ from .state import RunInfo, ViewState, parse_orders
 from .theme import (
     AREA_MIN_CM2,
     AXES,
+    DEFAULT_VISIBLE_OVERTONES,
     DESPIKE_WINDOW_DEFAULT,
     MPE_CLIP_HI_DEFAULT,
     MPE_CLIP_LO_DEFAULT,
@@ -135,6 +136,15 @@ class ViewerControls:
         }
         self.group_options = group_options
         saved_groups = [str(g) for g in self.saved.get("groups", self.info.groups) if g in self.info.groups]
+        if "groups" not in self.saved:
+            # Fresh run: default to the overtones practitioners actually read
+            # (n = 3, 5, 7 — the fundamental is unreliable and the high
+            # overtones mostly restate them; all stay one click away). A run
+            # without that subset keeps everything on.
+            preferred = [str(g) for g in self.info.groups
+                         if self.info.orders.get(g, 1) in DEFAULT_VISIBLE_OVERTONES]
+            if preferred:
+                saved_groups = preferred
         default_orders = ", ".join(f"g{g}:n={n}" for g, n in sorted(self.info.orders.items()))
 
         self.group_select = pn.widgets.CheckButtonGroup(

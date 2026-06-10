@@ -58,7 +58,9 @@ def test_single_run_set_is_not_multi(tmp_path):
 
 def test_overlay_frame_tags_each_run(tmp_path):
     rs = _two_run_set(tmp_path)
-    state = ViewerControls(rs.active.info, {}).state()
+    # Select every channel explicitly — the fresh-run default is the n=3,5,7
+    # subset (see test_declutter); these tests exercise the overlay machinery.
+    state = ViewerControls(rs.active.info, {"groups": rs.active.info.groups}).state()
     full = replace(state, t_range_s=(0.0, float(rs.active.info.span_s)))
     frame = rs.overlay_value_df(full, "delta_f_norm", "time")
     assert not frame.is_empty()
@@ -69,7 +71,9 @@ def test_overlay_frame_tags_each_run(tmp_path):
 
 def test_overlay_frame_aligns_each_run_to_own_start(tmp_path):
     rs = _two_run_set(tmp_path)
-    state = ViewerControls(rs.active.info, {}).state()
+    # Select every channel explicitly — the fresh-run default is the n=3,5,7
+    # subset (see test_declutter); these tests exercise the overlay machinery.
+    state = ViewerControls(rs.active.info, {"groups": rs.active.info.groups}).state()
     full = replace(state, t_range_s=(0.0, float(rs.active.info.span_s)))
     frame = rs.overlay_value_df(full, "delta_f_norm", "time")
     # Both runs start their elapsed-time axis at ~0 regardless of wall clock.
@@ -111,7 +115,9 @@ def test_overlay_timeline_builds(tmp_path):
     from qcm.viz.theme import axis, quantity
 
     rs = _two_run_set(tmp_path)
-    state = ViewerControls(rs.active.info, {}).state()
+    # Select every channel explicitly — the fresh-run default is the n=3,5,7
+    # subset (see test_declutter); these tests exercise the overlay machinery.
+    state = ViewerControls(rs.active.info, {"groups": rs.active.info.groups}).state()
     full = replace(state, t_range_s=(0.0, float(rs.active.info.span_s)))
     frame = rs.overlay_value_df(full, "delta_f_norm", "time")
     plot = plots.overlay_timeline(
