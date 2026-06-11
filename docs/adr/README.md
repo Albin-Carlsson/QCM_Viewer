@@ -20,3 +20,4 @@ Format: lightweight [MADR](https://adr.github.io/madr/). Status is one of
 | [0005](0005-design-token-system.md) | Single tokenised stylesheet under shadow DOM | Accepted |
 | [0006](0006-ui-error-policy.md) | Defensive surfaces must log, not swallow | Accepted |
 | [0007](0007-noncommercial-license.md) | PolyForm Noncommercial license | Accepted |
+| [0008](0008-profile-plugin-protocol.md) | Profile plugin protocol (confidence detection, entry points, golden harness) | Accepted |

@@ -164,3 +164,9 @@ def attach_cv_echem(
         pl.col("cycle").fill_nan(None).cast(pl.Int64, strict=False),
     )
     return qcm_frame.join(echem_df, on="timestamp", how="left")
+
+
+from .base import FunctionProfile  # noqa: E402
+
+# Potentiostat (CV) profile: detection only — pairing lives in import_run.
+PROFILE = FunctionProfile("pstrace_cv", "ps", is_cv_pstrace_csv)

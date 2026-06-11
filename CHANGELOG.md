@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Profile plugin protocol** (Phase 2): import formats are now pluggable. A
+  `Profile` contract (`qcm/profiles/base.py`) with confidence-ranked detection
+  (`detect_profiles`) and `qcm.profiles` entry-point discovery lets a new
+  instrument format ship in-tree or as a separate pip package without touching
+  core. A golden-file harness (`tests/golden/` + `test_golden_profiles.py`) locks
+  each profile's canonical output. Public functions and profile names are
+  unchanged. See `docs/add-a-data-source.md` and ADR 0008.
+
 - **Baseline drift correction** (Phase 1): a "Drift correction" toggle (linear or
   quadratic) in the Signal cleanup card fits a polynomial trend of the referenced
   resonance signal over the **reference window** and subtracts it — extrapolated —
