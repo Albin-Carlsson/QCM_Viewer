@@ -80,6 +80,18 @@ class ResultsStep(BaseStep):
         )
         self.cycle_zero = pn.widgets.Checkbox(label="Zero f/D at cycle start", value=True)
 
+        # One-click PS↔QCM alignment: apply the estimated lag to the run's stored
+        # offset (re-interpolated from the retained PS stream — no re-import).
+        self.apply_offset_button = pn.widgets.Button(
+            label="Apply this offset", button_type="primary", icon="adjustments",
+            sizing_mode="stretch_width",
+        )
+        self.reset_offset_button = pn.widgets.Button(
+            label="Reset", button_type="default", icon="restore", width=96,
+        )
+        self.apply_offset_button.on_click(self._apply_alignment)
+        self.reset_offset_button.on_click(self._reset_alignment)
+
     # --- inputs ------------------------------------------------------------
     @property
     def _cycle_inputs(self) -> tuple:
@@ -636,14 +648,65 @@ class ResultsStep(BaseStep):
             else:
                 msg = (f"<b>Possible misalignment:</b> EC features arrive "
                        f"{est['lag_s']:+.1f} s relative to the QCM response "
-                       f"(correlation {est['corr']:.2f}). Re-import with "
-                       f"<code>--ps-offset {-est['lag_s']:.1f}</code> to realign.")
+                       f"(correlation {est['corr']:.2f}). Apply the correction "
+                       f"below to realign.")
                 tone = "warning"
             readout = pn.pane.HTML(f"<div class='qcm-hint {tone}'>{msg}</div>",
                                    margin=0, sizing_mode="stretch_width")
-            return pn.Column(plot, readout, margin=0, sizing_mode="stretch_width")
+            children = [plot, readout, self._alignment_controls(est)]
+            return pn.Column(*[c for c in children if c is not None], margin=0,
+                             sizing_mode="stretch_width")
         except Exception as exc:  # pragma: no cover
             return surface_error("Alignment check", exc)
+
+    def _alignment_controls(self, est):
+        """Apply/Reset offset row — only for runs with a retained PS stream
+        (CP EQCM), where re-alignment is meaningful and re-interpolatable."""
+        run = self.data.run
+        if not getattr(run, "has_echem_stream", False):
+            return None
+        current = run.ps_offset_s
+        applicable = est is not None and est.get("corr", 0) >= 0.1
+        self.apply_offset_button.disabled = not applicable
+        chip = (f"<div class='qcm-hint info'>Applied PS offset: "
+                f"<b>{current:+.1f} s</b></div>")
+        return pn.Column(
+            pn.pane.HTML(chip, margin=0, sizing_mode="stretch_width"),
+            pn.Row(self.apply_offset_button, self.reset_offset_button, margin=0,
+                   sizing_mode="stretch_width"),
+            margin=0, sizing_mode="stretch_width", css_classes=["qcm-align-actions"],
+        )
+
+    def _apply_alignment(self, _event=None) -> None:
+        """Fold the estimated residual lag into the run's stored PS offset.
+
+        The estimate is the residual *at the current offset*, so the corrected
+        absolute offset is ``current − lag`` (matching the old
+        ``--ps-offset (−lag)`` recipe). Re-derived from the retained stream on the
+        next read; no re-import."""
+        try:
+            run = self.data.run
+            est = science.alignment_lag(self._alignment_frame())
+            if est is None or est.get("corr", 0) < 0.1:
+                self.actions.notify("Not enough correlated signal to align automatically.", "warning")
+                return
+            new_offset = run.ps_offset_s - float(est["lag_s"])
+            run.set_ps_offset(new_offset)
+            self.data.clear_echem_cache()
+            self.controls.runset_version.value += 1
+            self.actions.notify(f"Applied PS offset {new_offset:+.1f} s — re-aligned.", "success")
+        except Exception as exc:
+            self.actions.notify(f"Could not apply alignment: {exc}", "error")
+
+    def _reset_alignment(self, _event=None) -> None:
+        try:
+            run = self.data.run
+            run.set_ps_offset(0.0)
+            self.data.clear_echem_cache()
+            self.controls.runset_version.value += 1
+            self.actions.notify("PS offset reset to 0 s (as imported).", "success")
+        except Exception as exc:
+            self.actions.notify(f"Could not reset alignment: {exc}", "error")
 
     def per_cycle_table(self):
         try:

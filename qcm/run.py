@@ -29,6 +29,7 @@ class QCMRun:
         # The sweep index is static for a run; cache the unfiltered read so the
         # app's repeated calls (init, tap-to-jump, readouts) hit memory.
         self._sweep_index_full: pl.DataFrame | None = None
+        self._echem_stream: pl.DataFrame | None = None
 
     @property
     def time_start(self) -> int:
@@ -40,7 +41,51 @@ class QCMRun:
 
     @property
     def columns(self) -> list[str]:
-        return self.manifest.columns
+        """Columns the run can serve, including echem channels held in the
+        sidecar stream (derived on read). Listing the stream's roles here means
+        capability checks (has_echem, available axes/quantities) and the echem
+        read path all see the cell channels without special-casing."""
+        cols = list(self.manifest.columns)
+        for role in self.echem_stream_roles:
+            if role not in cols:
+                cols.append(role)
+        return cols
+
+    # --- echem stream (retained raw potentiostat channels) ----------------
+    @property
+    def _echem_path(self) -> Path:
+        return self.path / self.manifest.paths.echem
+
+    @property
+    def has_echem_stream(self) -> bool:
+        return self._echem_path.exists()
+
+    def echem_stream(self) -> pl.DataFrame:
+        """The retained raw cell stream ``[time_s, <roles>]`` (empty if none).
+
+        ``time_s`` is elapsed seconds zeroed at the stream's first sample; the
+        data layer interpolates the roles onto the QCM clock at
+        ``time_s + ps_offset_s``."""
+        if not self.has_echem_stream:
+            return pl.DataFrame()
+        if self._echem_stream is None:
+            self._echem_stream = pl.read_parquet(self._echem_path)
+        return self._echem_stream
+
+    @property
+    def echem_stream_roles(self) -> tuple[str, ...]:
+        if not self.has_echem_stream:
+            return ()
+        return tuple(c for c in self.echem_stream().columns if c != "time_s")
+
+    @property
+    def ps_offset_s(self) -> float:
+        return float(getattr(self.manifest, "ps_offset_s", 0.0) or 0.0)
+
+    def set_ps_offset(self, seconds: float) -> None:
+        """Persist the PS↔QCM alignment offset to the manifest (re-applied on read)."""
+        self.manifest.ps_offset_s = float(seconds)
+        self.manifest.save(self.path)
 
     @property
     def groups(self) -> list[int]:

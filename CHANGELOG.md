@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **One-click PS↔QCM alignment** (Phase 1): the alignment card's residual-lag
+  estimate can now be applied in-app — no CLI re-import. CP EQCM imports retain
+  the raw potentiostat stream as a sidecar (`echem.parquet`); the echem channels
+  are derived onto the QCM clock at a manifest `ps_offset_s`, so **Apply this
+  offset** / **Reset** re-align instantly and exactly (re-interpolated from the
+  raw stream), reversibly, and the offset persists with the run and shows in Run
+  info. Echem reads are funnelled through one chokepoint (`QCMViewData._timeline`);
+  the offset is part of the cache key.
 - **Auto-suggested baseline** (Phase 1): a "Suggest stable window" button on the
   Reference range card finds the flattest stretch near the run start (minimum
   variance of the resonance signal, `science.stablest_window`) and fills the
@@ -37,6 +45,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Project renamed from `qcm-refactor` to `qcm-viewer`.
+- CP PSTrace imports no longer bake potential/current/charge into the main fit
+  table — they are retained as the raw stream (`echem.parquet`) and derived on
+  read, enabling the editable alignment offset above. CV and parquet-native
+  echem are unchanged.
 
 ### Fixed
 - Box-select brushing and typed Start/End range edits now apply (the programmatic

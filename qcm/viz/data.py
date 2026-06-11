@@ -50,8 +50,50 @@ class QCMViewData:
         return value
 
     def _timeline(self, columns: tuple[str, ...], t0: int, t1: int, groups: tuple[int, ...], level: str | None = None) -> pl.DataFrame:
-        key = ("timeline", level, columns, int(t0), int(t1), groups)
-        return self._cache_get(key, lambda: self.run.timeline(list(columns), t0=t0, t1=t1, groups=list(groups) or None, level=level))
+        # Echem channels held in the retained PS stream are derived on read by
+        # interpolating onto the QCM clock at the current alignment offset, so a
+        # changed offset re-applies instantly (the offset is part of the key).
+        roles = self.run.echem_stream_roles
+        echem_cols = tuple(c for c in columns if c in roles)
+        if not echem_cols:
+            key = ("timeline", level, columns, int(t0), int(t1), groups)
+            return self._cache_get(key, lambda: self.run.timeline(list(columns), t0=t0, t1=t1, groups=list(groups) or None, level=level))
+        key = ("timeline_echem", level, columns, int(t0), int(t1), groups, self.run.ps_offset_s)
+        return self._cache_get(key, lambda: self._derive_timeline(columns, echem_cols, t0, t1, groups, level))
+
+    def _derive_timeline(self, columns: tuple[str, ...], echem_cols: tuple[str, ...], t0: int, t1: int, groups: tuple[int, ...], level: str | None) -> pl.DataFrame:
+        stored = [c for c in columns if c not in echem_cols]
+        # A skeleton (timestamp + group) is needed to broadcast echem across
+        # overtone rows even when only echem columns were requested.
+        read = stored or ["fit_center"]
+        base = self.run.timeline(read, t0=t0, t1=t1, groups=list(groups) or None, level=level)
+        base = self._attach_echem(base, echem_cols)
+        drop = [c for c in read if c not in columns]  # the skeleton fit_center, if borrowed
+        return base.drop(drop) if drop else base
+
+    def _attach_echem(self, df: pl.DataFrame, roles: tuple[str, ...]) -> pl.DataFrame:
+        """Interpolate the retained PS stream's roles onto ``df``'s timestamps at
+        the run's alignment offset, broadcasting across overtone groups."""
+        import numpy as np
+
+        null_cols = [pl.lit(None, dtype=pl.Float64).alias(r) for r in roles]
+        stream = self.run.echem_stream()
+        if df.is_empty() or "timestamp" not in df.columns or stream.is_empty():
+            return df.with_columns(null_cols)
+        ps_t = stream["time_s"].to_numpy() + self.run.ps_offset_s
+        ts = df["timestamp"].unique().sort()
+        q_elapsed = (ts.to_numpy() - self.info.t0_us) / _US
+        out: dict[str, Any] = {"timestamp": ts}
+        for r in roles:
+            if r in stream.columns:
+                out[r] = np.interp(q_elapsed, ps_t, stream[r].to_numpy())
+        echem_df = pl.DataFrame(out)
+        return df.join(echem_df, on="timestamp", how="left")
+
+    def clear_echem_cache(self) -> None:
+        """Drop cached echem-derived frames after the alignment offset changes."""
+        for k in [k for k in self._query_cache if k and k[0] in ("timeline_echem", "echem_wf")]:
+            del self._query_cache[k]
 
     def _baseline_mean(self, value_expr: str, b0: int, b1: int, groups: tuple[int, ...]) -> pl.DataFrame:
         key = ("baseline", value_expr, int(b0), int(b1), groups)
@@ -244,7 +286,7 @@ class QCMViewData:
         if not cols:
             return pl.DataFrame()
         groups = (self.info.groups[0],) if self.info.groups else ()
-        key = ("echem_wf", cols, groups)
+        key = ("echem_wf", cols, groups, self.run.ps_offset_s)
         return self._cache_get(
             key,
             lambda: echem.waveform(self._timeline(cols, self.info.t0_us, self.info.t1_us, groups)),

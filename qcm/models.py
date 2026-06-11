@@ -17,6 +17,9 @@ class PathsInfo(BaseModel):
     sweeps: str = "sweeps/index.parquet"
     annotations: str = "annotations.json"
     expressions: str = "expressions.json"
+    # Raw potentiostat stream (CP EQCM): the cell channels on their own time base,
+    # retained so the PS↔QCM alignment offset can be re-applied without re-import.
+    echem: str = "echem.parquet"
 
 
 class Manifest(BaseModel):
@@ -30,6 +33,10 @@ class Manifest(BaseModel):
     pyramid_levels: list[str] = Field(default_factory=lambda: ["100ms", "1s", "10s", "1min", "10min", "1h"])
     paths: PathsInfo = Field(default_factory=PathsInfo)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # PS↔QCM alignment: seconds the potentiostat stream is shifted before being
+    # interpolated onto the QCM clock. Editable in-app (no re-import); 0 = as
+    # imported. Only meaningful for runs with a retained echem stream.
+    ps_offset_s: float = 0.0
 
     @classmethod
     def load(cls, run_path: str | Path) -> "Manifest":

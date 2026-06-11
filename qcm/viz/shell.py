@@ -170,6 +170,14 @@ class ViewerShell:
             _ref = ""
         if _ref:
             rows.append(("Reference", _ref))
+        # PS↔QCM alignment offset (only when a stream is retained and shifted).
+        try:
+            if getattr(self.run, "has_echem_stream", False):
+                _off = float(self.run.ps_offset_s)
+                if abs(_off) > 1e-9:
+                    rows.append(("PS offset", f"{_off:+.1f} s"))
+        except Exception:
+            pass
         if meta.get("sample_rate") is not None:
             rows.append(("Sample rate", f"{meta['sample_rate']} Hz"))
         if meta.get("temperature") is not None:

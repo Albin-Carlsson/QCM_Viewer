@@ -23,7 +23,7 @@ import tempfile
 from pathlib import Path
 
 from ..ingest import ingest
-from .pstrace_csv import attach_echem, is_pstrace_csv, read_pstrace_csv
+from .pstrace_csv import is_pstrace_csv, read_pstrace_csv
 from .pstrace_cv_csv import (
     DEFAULT_CV_SCAN_RATE,
     attach_cv_echem,
@@ -204,6 +204,7 @@ def import_run(
         raise ValueError(f"Unsupported QCM profile '{name}' for {source}.")
 
     extra_metadata: dict | None = None
+    cp_stream: "pl.DataFrame | None" = None
     if ps_source is not None:
         # A CV PSTrace export is potential/scan-indexed (per-scan i-vs-E blocks),
         # so it takes its own reader/attach; everything else is the time-indexed
@@ -224,10 +225,28 @@ def import_run(
             frame = attach_cv_echem(frame, read_cv_pstrace_csv(ps_source), scan_rate=rate)
             extra_metadata = {"cv_scan_rate_v_per_s": float(rate), "cv_scan_rate_source": rate_source}
         else:
-            frame = attach_echem(frame, read_pstrace_csv(ps_source), offset_s=ps_offset_s)
+            # CP (galvanostatic) shares a real clock with the QCM, so the PS↔QCM
+            # offset is correctable after import. Retain the raw cell stream as a
+            # sidecar (time zeroed at its first sample) instead of baking it into
+            # the run; the data layer interpolates it onto the QCM clock at the
+            # manifest offset, so re-alignment never needs a re-import.
+            import polars as pl
+
+            cp_stream = read_pstrace_csv(ps_source).sort("time_s")
+            cp_stream = cp_stream.with_columns(
+                (pl.col("time_s") - pl.col("time_s").min()).alias("time_s")
+            )
     with tempfile.TemporaryDirectory() as tmp:
         staged = Path(tmp) / "canonical.parquet"
         frame.write_parquet(staged)
-        return ingest(staged, dest, overwrite=overwrite,
-                      raw_part_rows=raw_part_rows, memory_limit=memory_limit,
-                      source_label=str(source), extra_metadata=extra_metadata)
+        out = ingest(staged, dest, overwrite=overwrite,
+                     raw_part_rows=raw_part_rows, memory_limit=memory_limit,
+                     source_label=str(source), extra_metadata=extra_metadata)
+    if cp_stream is not None:
+        from ..models import Manifest
+
+        manifest = Manifest.load(out)
+        cp_stream.write_parquet(out / manifest.paths.echem)
+        manifest.ps_offset_s = float(ps_offset_s)
+        manifest.save(out)
+    return out
