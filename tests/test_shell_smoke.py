@@ -26,6 +26,7 @@ def test_pages_render_per_mode(demo_run_path):
     expected = {
         "data": ("qcm-page-data", "qcm-toolbar2", "qcm-anchor", "qcm-rail", "qcm-stats"),
         "results": ("qcm-page-results",),
+        "figure": ("qcm-page-figure",),
         "report": ("qcm-page-report",),
     }
     for i, mode in enumerate(nav.MODES):

@@ -47,6 +47,7 @@ from .tokens import (
 from .steps.phases import PhasesStep
 from .steps.qc_drawer import QCDrawer
 from .steps.quantify import QuantifyStep
+from .steps.figure import CompositeFigureStep
 from .steps.report import ReportStep
 from .steps.results import ResultsStep
 from .steps.review import ReviewStep
@@ -76,14 +77,17 @@ class ViewerShell:
         self._phases = PhasesStep(controls, data, actions)
         self._quantify = QuantifyStep(controls, data, actions)
         self._results = ResultsStep(controls, data, actions)
+        self._figure = CompositeFigureStep(controls, data, actions)
         self._report = ReportStep(controls, data, actions)
         self._qc = QCDrawer(controls, data, actions)
 
         # Build persistent pieces once.
         self._page_data = self._build_data_page()
         self._page_results = self._build_results_page()
+        self._page_figure = self._build_figure_page()
         self._page_report = self._build_report_page()
-        self._pages = {"data": self._page_data, "results": self._page_results, "report": self._page_report}
+        self._pages = {"data": self._page_data, "results": self._page_results,
+                       "figure": self._page_figure, "report": self._page_report}
 
         # Exactly one page is mounted at a time. Swapping ``objects`` (rather than
         # toggling ``visible`` on three always-mounted pages) guarantees the pages
@@ -110,8 +114,10 @@ class ViewerShell:
     def _on_runset_change(self, _event=None) -> None:
         self._page_data = self._build_data_page()
         self._page_results = self._build_results_page()
+        self._page_figure = self._build_figure_page()
         self._page_report = self._build_report_page()
-        self._pages = {"data": self._page_data, "results": self._page_results, "report": self._page_report}
+        self._pages = {"data": self._page_data, "results": self._page_results,
+                       "figure": self._page_figure, "report": self._page_report}
         self._sync_pages(self.mode.value)
         # Persist the workspace (paths + labels + active) on every set change.
         self.runset.save_session()
@@ -683,6 +689,10 @@ class ViewerShell:
     # =====================================================  RESULTS page
     def _build_results_page(self):
         return self._results.page()
+
+    # =====================================================  FIGURE page
+    def _build_figure_page(self):
+        return self._figure.page()
 
     # =====================================================  REPORT page
     def _build_report_page(self):

@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Composite figure builder** (Phase 1): a new **Figure** page that composes the
+  reference notebook's flagship output — E(t) / Δf/n(t) / ΔD(t) (and optionally
+  Current / Charge / Mass / MPE) stacked on a shared time axis, every loaded run
+  overlaid as a colour family with per-overtone shades. Toggle panels, pick a
+  journal column width, and download **true vector PDF/SVG** (or PNG) rendered
+  with matplotlib. Reuses the existing `value_df`/`overlay_value_df` services and
+  the design-token colours, and honours the reference-electrode label on the E
+  panel. New `qcm/viz/figure.py` (UI-free builder) + `qcm/viz/steps/figure.py`.
 - **One-click PS↔QCM alignment** (Phase 1): the alignment card's residual-lag
   estimate can now be applied in-app — no CLI re-import. CP EQCM imports retain
   the raw potentiostat stream as a sidecar (`echem.parquet`); the echem channels

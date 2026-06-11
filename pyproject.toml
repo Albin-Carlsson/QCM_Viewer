@@ -27,6 +27,7 @@ dependencies = [
   "duckdb>=1.0",
   "holoviews>=1.19",
   "hvplot>=0.10",
+  "matplotlib>=3.8",
   "jupyterlab>=4.0",
   "jupyter-bokeh>=4.0",
   "ipykernel>=6.29",
