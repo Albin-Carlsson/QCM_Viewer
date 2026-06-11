@@ -35,9 +35,10 @@ Two hard layering rules:
   quantity consistently because they all read `ExperimentParams`/`theme`.
 - **Cost:** the SQL/Polars lockstep is a manual invariant (currently a comment;
   the roadmap proposes a parametrized equivalence test to enforce it).
-- **Obligation:** keep Panel out of `science`/`echem`. The roadmap proposes an
-  import-linter contract so this is a CI failure, not a convention. The same
-  rule lets `qcm/log.py` (core) be Panel-free while the UI error helper lives in
+- **Obligation:** keep Panel out of `science`/`echem`. This is now **enforced by
+  import-linter** (`[tool.importlinter]` in `pyproject.toml`, run in CI's `arch`
+  job; see [0008]) — a CI failure, not a convention. The same rule lets
+  `qcm/log.py` (core) be Panel-free while the UI error helper lives in
   `qcm/viz/errors.py` (see [0006]).
 
 [0006]: 0006-ui-error-policy.md

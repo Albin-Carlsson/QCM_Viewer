@@ -28,6 +28,23 @@ jobs:
       - name: Lint
         run: ruff check .
 
+  arch:
+    name: Architecture (import-linter)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      # import-linter builds the import graph, so the package must be installed.
+      - name: Install package + dev deps
+        run: uv pip install --system -e ".[dev]"
+      - name: Enforce layering contracts
+        run: lint-imports
+
   test:
     name: Tests (${{ matrix.os }} · py${{ matrix.python-version }})
     needs: lint

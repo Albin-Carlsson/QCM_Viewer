@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Architecture enforcement** (Phase 2): import-linter contracts
+  (`[tool.importlinter]`) make the ADR layering invariants CI failures — the
+  pure science layer (`qcm.viz.science`/`echem`) and the core data/IO modules
+  never pull rendering libraries, and the storage/model/profile modules never
+  import `qcm.viz`. Runs in a dedicated CI `arch` job (`lint-imports`).
 - **Profile plugin protocol** (Phase 2): import formats are now pluggable. A
   `Profile` contract (`qcm/profiles/base.py`) with confidence-ranked detection
   (`detect_profiles`) and `qcm.profiles` entry-point discovery lets a new

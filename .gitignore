@@ -43,6 +43,8 @@ example_run/
 view-run/
 view_run/
 *.parquet
+# …but golden-test fixtures (tiny canonical-frame baselines) must be tracked.
+!tests/golden/**/*.parquet
 
 # Local measurement data (raw instrument exports, ~100MB each)
 2604* baseline*/
