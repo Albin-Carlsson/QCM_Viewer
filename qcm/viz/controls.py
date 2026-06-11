@@ -921,12 +921,22 @@ class ViewerControls:
             label="Despike window", value=int(s.get("despike_window", DESPIKE_WINDOW_DEFAULT)),
             start=3, step=2, sizing_mode="stretch_width",
         )
+        # Baseline drift correction: fit a trend over the reference window and
+        # subtract it (toggle off/on to see before/after). Linear or quadratic.
+        self.detrend = pn.widgets.Checkbox(
+            label="Drift correction", value=bool(s.get("detrend", False)),
+        )
+        self.detrend_order = pn.widgets.Select(
+            label="Drift fit", options={"Linear": 1, "Quadratic": 2},
+            value=int(s.get("detrend_order", 1)), sizing_mode="stretch_width",
+        )
 
     @property
     def mpe_inputs(self) -> tuple:
         return (self.mpe_smooth, self.mpe_window, self.mpe_clip,
                 self.mpe_clip_lo, self.mpe_clip_hi, self.mpe_target_show,
-                self.despike, self.despike_window)
+                self.despike, self.despike_window,
+                self.detrend, self.detrend_order)
 
     def overtone_orders_panel(self) -> pn.viewable.Viewable:
         """Editable overtone-order map (n per channel).
@@ -994,6 +1004,10 @@ class ViewerControls:
                          "(relay switching, bubbles). Electrochemistry channels "
                          "are never modified.</small>", margin=0),
             self.despike, self.despike_window,
+            pn.pane.HTML("<small>Drift correction subtracts a trend fitted over the "
+                         "<b>reference window</b> (set a good baseline first). Toggle "
+                         "it off/on to compare before/after.</small>", margin=0),
+            self.detrend, self.detrend_order,
             title="Signal cleanup", collapsible=True, collapsed=True, margin=0,
             sizing_mode="stretch_width", css_classes=["qcm-card", "signal-cleanup"],
         )
@@ -1026,6 +1040,8 @@ class ViewerControls:
             mpe_target_show=bool(self.mpe_target_show.value),
             despike=bool(self.despike.value),
             despike_window=int(self.despike_window.value or DESPIKE_WINDOW_DEFAULT),
+            detrend=bool(self.detrend.value),
+            detrend_order=int(self.detrend_order.value or 1),
         )
 
     def _safe_float(self, value, fallback: float) -> float:

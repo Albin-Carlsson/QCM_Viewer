@@ -65,6 +65,10 @@ class ViewState:
     # Hampel despike of resonance traces (applies to f/D/mass-family quantities).
     despike: bool = False
     despike_window: int = DESPIKE_WINDOW_DEFAULT
+    # Baseline drift correction: subtract a trend fitted over the reference window
+    # (order 1 = linear, 2 = quadratic). Applies to the referenced resonance family.
+    detrend: bool = False
+    detrend_order: int = 1
 
     def t_us(self, t0_us: int) -> tuple[int, int]:
         start, end = self.t_range_s

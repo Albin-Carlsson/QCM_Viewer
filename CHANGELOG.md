@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Baseline drift correction** (Phase 1): a "Drift correction" toggle (linear or
+  quadratic) in the Signal cleanup card fits a polynomial trend of the referenced
+  resonance signal over the **reference window** and subtracts it — extrapolated —
+  from the whole run, generalising baseline-mean subtraction to remove thermal /
+  crystal-aging drift while preserving real steps. Applies consistently to Δf/n,
+  ΔD, and Sauerbrey mass across plots, stats, and export; the plot title notes
+  "drift-corrected (linear/quadratic)" (`science.detrend`). Toggle off/on to
+  compare before/after.
 - **Composite figure builder** (Phase 1): a new **Figure** page that composes the
   reference notebook's flagship output — E(t) / Δf/n(t) / ΔD(t) (and optionally
   Current / Charge / Mass / MPE) stacked on a shared time axis, every loaded run

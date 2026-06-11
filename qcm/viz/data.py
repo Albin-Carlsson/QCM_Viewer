@@ -126,6 +126,17 @@ class QCMViewData:
             base_means = self._baseline_mean(science.raw_value_sql(q), b0, b1, groups)
         out = science.compute(main, key, state.orders, baseline_means_df=base_means,
                               params=getattr(state, "params", None))
+        # Drift correction: subtract a per-group trend fitted over the reference
+        # window (generalises baseline-mean subtraction to a linear/poly drift).
+        # Only the referenced resonance family drifts meaningfully; echem and the
+        # MPE derivative are left alone.
+        if getattr(state, "detrend", False) and q.kind in ("frequency", "dissipation", "mass"):
+            b0, b1 = state.baseline_us(self.info.t0_us)
+            ref_main = self._timeline(tuple(q.sources), b0, b1, groups)
+            ref_out = science.compute(ref_main, key, state.orders, baseline_means_df=base_means,
+                                      params=getattr(state, "params", None))
+            out = science.detrend(out, ref_out, t0_us=self.info.t0_us,
+                                  order=getattr(state, "detrend_order", 1))
         # Despike resonance-derived traces (spikes originate in the resonance
         # fit, so cell-level echem channels are left untouched).
         if getattr(state, "despike", False) and (q.is_resonance or q.kind == "mpe"):

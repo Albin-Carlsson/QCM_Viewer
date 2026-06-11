@@ -272,6 +272,61 @@ def despike(
     return out.group_by("group", maintain_order=True).map_groups(_despike_group)
 
 
+def detrend(
+    value_df: pl.DataFrame,
+    ref_value_df: pl.DataFrame,
+    *,
+    t0_us: int,
+    order: int = 1,
+) -> pl.DataFrame:
+    """Remove baseline drift by subtracting a per-group trend fitted on a window.
+
+    Over a long run the QCM baseline drifts (thermal, crystal aging) even when
+    nothing is adsorbing, tilting Δf/ΔD/mass. Referencing only subtracts the
+    baseline *mean* (a 0th-order fit); this generalises it: fit a degree-``order``
+    polynomial of the (already-referenced) quantity vs elapsed time over the
+    reference window (``ref_value_df``), then subtract that trend — extrapolated —
+    from every point in ``value_df``. With ``order=1`` it removes a linear drift;
+    higher orders remove gentle curvature.
+
+    Both frames carry ``timestamp, group, value`` in the same (referenced) units.
+    ``t0_us`` anchors the time origin so the fit extrapolates consistently across
+    the run. Groups with too few reference points to fit are left untouched.
+    """
+    if (
+        value_df.is_empty() or ref_value_df.is_empty()
+        or "value" not in value_df.columns or "group" not in value_df.columns
+    ):
+        return value_df
+
+    import numpy as np
+
+    order = max(1, int(order))
+    coeffs: dict[int, np.ndarray] = {}
+    for sub in ref_value_df.partition_by("group"):
+        clean = sub.select(["timestamp", "value"]).drop_nulls()
+        if clean.height < order + 1:
+            continue
+        t = (clean["timestamp"].to_numpy() - t0_us) / 1_000_000.0
+        y = clean["value"].to_numpy()
+        try:
+            coeffs[int(sub["group"][0])] = np.polyfit(t, y, order)
+        except (np.linalg.LinAlgError, ValueError):
+            continue
+    if not coeffs:
+        return value_df
+
+    def _apply(df: pl.DataFrame) -> pl.DataFrame:
+        c = coeffs.get(int(df["group"][0]))
+        if c is None:
+            return df
+        t = (df["timestamp"].to_numpy() - t0_us) / 1_000_000.0
+        trend = np.polyval(c, t)
+        return df.with_columns((pl.col("value") - pl.Series("_trend", trend)).alias("value"))
+
+    return value_df.group_by("group", maintain_order=True).map_groups(_apply)
+
+
 def stablest_window(
     t_s,
     y,

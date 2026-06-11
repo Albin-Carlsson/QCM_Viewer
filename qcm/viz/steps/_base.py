@@ -429,6 +429,9 @@ class BaseStep:
         notes: list[str] = []
         if q.kind == "mpe" and getattr(state, "mpe_clip", False):
             notes.append(f"clipped to [{state.mpe_clip_lo:g}, {state.mpe_clip_hi:g}] g/mol")
+        if getattr(state, "detrend", False) and q.kind in ("frequency", "dissipation", "mass"):
+            notes.append("drift-corrected (quadratic)" if int(getattr(state, "detrend_order", 1)) >= 2
+                         else "drift-corrected (linear)")
         if q.normalized and state.groups:
             if all(int(state.orders.get(g, 1)) == 1 for g in state.groups):
                 notes.append("n=1 (no normalization)")
