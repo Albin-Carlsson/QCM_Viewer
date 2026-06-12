@@ -248,10 +248,16 @@ def import_run(
                      raw_part_rows=raw_part_rows, memory_limit=memory_limit,
                      source_label=str(source), extra_metadata=extra_metadata or None)
     if cp_stream is not None:
+        from ..ingest import units_for
         from ..models import Manifest
 
         manifest = Manifest.load(out)
         cp_stream.write_parquet(out / manifest.paths.echem)
         manifest.ps_offset_s = float(ps_offset_s)
+        # The cell channels live in the sidecar, not inline columns, so the
+        # echem capability (and the roles' units) is recorded here.
+        if "echem" not in manifest.capabilities:
+            manifest.capabilities.append("echem")
+        manifest.units.update(units_for(cp_stream.columns))
         manifest.save(out)
     return out

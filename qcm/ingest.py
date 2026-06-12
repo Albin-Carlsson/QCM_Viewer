@@ -42,6 +42,51 @@ RAW_SWEEP_MARKERS = ("raw_i", "raw_q", "conductance", "susceptance")
 # Backwards-compatible alias.
 REQUIRED = CORE_REQUIRED
 
+# Source unit per canonical column, persisted in the manifest (``units``) so a
+# run stays self-describing once exported — CSV without units is future pain.
+# Dimensionless columns (sequence, group, cycle) are deliberately absent.
+CANONICAL_UNITS = {
+    "timestamp": "us",
+    "fit_center": "Hz",
+    "fit_fwhm": "Hz",
+    "fit_gamma": "Hz",
+    "frequency": "Hz",
+    "conductance": "S",
+    "susceptance": "S",
+    "raw_i": "a.u.",
+    "raw_q": "a.u.",
+    "potential": "V",
+    "current": "A",
+    "charge": "C",
+    "cycle_time": "s",
+    "time_s": "s",
+    "temperature": "degC",
+}
+
+
+def derive_capabilities(columns, *, echem_sidecar: bool = False) -> list[str]:
+    """Capability flags ("raw", "echem", "temperature") for a run's columns.
+
+    These are persisted in the manifest so UI surfaces and the CLI key off
+    explicit flags instead of sniffing marker columns. ``echem_sidecar`` covers
+    CP runs whose cell channels live in the retained potentiostat stream rather
+    than inline columns.
+    """
+    cols = set(columns)
+    caps = []
+    if any(m in cols for m in RAW_SWEEP_MARKERS):
+        caps.append("raw")
+    if echem_sidecar or {"potential", "current"}.issubset(cols):
+        caps.append("echem")
+    if "temperature" in cols:
+        caps.append("temperature")
+    return caps
+
+
+def units_for(columns) -> dict[str, str]:
+    """column → source unit for the known canonical columns present."""
+    return {c: CANONICAL_UNITS[c] for c in columns if c in CANONICAL_UNITS}
+
 # UI overview levels. These are deliberately tiny compared with the raw table;
 # the app should use these for plots and only touch raw data for individual sweeps
 # or explicit exports.
@@ -276,14 +321,12 @@ def ingest(
     (dest / "annotations.json").write_text("[]")
     (dest / "expressions.json").write_text("{}")
 
-    has_raw = any(c in cols for c in RAW_SWEEP_MARKERS)
     metadata = {
         "rows": rows,
         "raw_parts": len(list((dest / "raw").glob("*.parquet"))),
         "raw_part_rows": int(raw_part_rows),
         "rows_copied": rows_copied,
         "optimized_for_large_files": True,
-        "has_raw": has_raw,
         "raw_columns_present": [c for c in RAW_OPTIONAL if c in cols],
     }
     if extra_metadata:
@@ -298,6 +341,8 @@ def ingest(
         pyramid_levels=list(LEVELS.keys()),
         paths=PathsInfo(),
         metadata=metadata,
+        capabilities=derive_capabilities(cols),
+        units=units_for(cols),
     )
     manifest.save(dest)
     return dest

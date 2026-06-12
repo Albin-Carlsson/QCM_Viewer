@@ -40,7 +40,7 @@ def test_conductance_only_export_is_recognised_as_raw(tmp_path):
     # No I/Q, but the conductance/susceptance sweep makes this a raw run.
     assert "raw_i" not in run.columns
     assert run.has_raw is True
-    assert run.manifest.metadata["has_raw"] is True
+    assert "raw" in run.capabilities
 
 
 def test_iq_scatter_degrades_without_iq():

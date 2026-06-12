@@ -141,7 +141,7 @@ def import_cmd(
     )
     run = open_run(out)
     kind = "raw" if run.has_raw else "fit-only"
-    echem = " + echem" if "potential" in run.columns else ""
+    echem = " + echem" if "echem" in run.capabilities else ""
     console.print(f"Imported {kind}{echem} run: {out} ({len(run.groups)} overtone channels)")
 
 

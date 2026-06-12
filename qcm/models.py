@@ -23,7 +23,7 @@ class PathsInfo(BaseModel):
 
 
 class Manifest(BaseModel):
-    schema_version: str = "1.0"
+    schema_version: str = "1.1"
     run_id: str
     created_at: str
     source_path: str | None = None
@@ -33,6 +33,13 @@ class Manifest(BaseModel):
     pyramid_levels: list[str] = Field(default_factory=lambda: ["100ms", "1s", "10s", "1min", "10min", "1h"])
     paths: PathsInfo = Field(default_factory=PathsInfo)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # What the run carries ("raw", "echem", "temperature"). UI surfaces and the
+    # CLI key off these explicit flags rather than sniffing marker columns; new
+    # optional column groups become a new flag here, not a schema break.
+    capabilities: list[str] = Field(default_factory=list)
+    # column → source unit for known columns (including sidecar stream roles),
+    # so exported data stays self-describing.
+    units: dict[str, str] = Field(default_factory=dict)
     # PS↔QCM alignment: seconds the potentiostat stream is shifted before being
     # interpolated onto the QCM clock. Editable in-app (no re-import); 0 = as
     # imported. Only meaningful for runs with a retained echem stream.

@@ -92,19 +92,18 @@ class QCMRun:
         return self.manifest.groups
 
     @property
+    def capabilities(self) -> list[str]:
+        """Explicit capability flags ("raw", "echem", "temperature")."""
+        return list(self.manifest.capabilities)
+
+    @property
     def has_raw(self) -> bool:
-        """Whether the run carries raw frequency-point data.
+        """Whether the run carries raw frequency-point sweep data.
 
         Fit-only runs (e.g. imported Qsoft Fr/D exports) have no raw sweeps, so
-        the sweep inspector and waterfall are unavailable. Prefer the manifest
-        flag; fall back to column presence for runs ingested before it existed.
+        the sweep inspector and waterfall are unavailable.
         """
-        flag = self.manifest.metadata.get("has_raw")
-        if flag is not None:
-            return bool(flag)
-        # Legacy runs (pre-flag): raw sweep data = any per-point measured signal
-        # (I/Q or conductance/susceptance), not just the fitted resonance.
-        return any(c in self.columns for c in ("raw_i", "raw_q", "conductance", "susceptance"))
+        return "raw" in self.manifest.capabilities
 
     def overtone_orders(self) -> dict[int, int]:
         """Infer the overtone order n for each group from resonance frequencies.
