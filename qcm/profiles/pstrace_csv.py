@@ -132,9 +132,3 @@ def attach_echem(qcm_frame: pl.DataFrame, ps: pl.DataFrame, offset_s: float = 0.
     echem_df = pl.DataFrame(echem)
 
     return qcm_frame.join(echem_df, on="timestamp", how="left")
-
-
-from .base import FunctionProfile  # noqa: E402
-
-# Potentiostat (CP) profile: detection only — pairing lives in import_run.
-PROFILE = FunctionProfile("pstrace_cp", "ps", is_pstrace_csv)

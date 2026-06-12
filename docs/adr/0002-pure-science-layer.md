@@ -42,3 +42,4 @@ Two hard layering rules:
   `qcm/viz/errors.py` (see [0006]).
 
 [0006]: 0006-ui-error-policy.md
+[0008]: 0008-enforce-layering-with-import-linter.md

@@ -38,11 +38,14 @@ plus parquet. Everything downstream sees only the canonical contract.
 - **Good:** auto-detection + auto-pairing of `*_PS.csv` removes the notebook's
   manual encoding/skiprow trial-and-error.
 - **Cost:** detection is heuristic; ambiguous files can mis-detect (mitigated by
-  override). The roadmap proposes confidence-scored detection, a `Profile`
-  protocol with entry-point discovery (so a new instrument ships as a separate
-  pip package), and a golden-file test harness to make "add a format in 30
-  minutes" durable.
+  override). The registry stays deliberately simple — a `(name, kind, predicate)`
+  list plus an explicit reader dispatch in `import_run` — because this tool
+  expects only a handful of formats added by hand. A `Profile`/entry-point plugin
+  system and confidence-ranked detection were prototyped and **removed as
+  over-engineering** (YAGNI for 2–3 formats); a golden-file harness
+  (`tests/golden/`) is kept as the regression net for "add a format."
 - **Obligation:** every profile must produce the *identical* canonical contract;
-  divergence there breaks the one-read-path guarantee in [0002].
+  divergence there breaks the one-read-path guarantee in [0002]. See
+  `docs/add-a-data-source.md`.
 
 [0002]: 0002-pure-science-layer.md

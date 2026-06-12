@@ -23,9 +23,7 @@ import tempfile
 from pathlib import Path
 
 from ..ingest import ingest
-from . import pstrace_csv, pstrace_cv_csv, qsoft_txt, standardized_csv
-from .base import FunctionProfile, Profile, ProfileResult  # noqa: F401  (re-exported for plugins)
-from .pstrace_csv import read_pstrace_csv
+from .pstrace_csv import is_pstrace_csv, read_pstrace_csv
 from .pstrace_cv_csv import (
     DEFAULT_CV_SCAN_RATE,
     attach_cv_echem,
@@ -33,106 +31,54 @@ from .pstrace_cv_csv import (
     read_cv_pstrace_csv,
     scan_rate_from_filename,
 )
+from .qsoft_txt import is_qsoft_txt, read_qsoft_txt
+from .standardized_csv import is_standardized_csv, read_standardized_csv
 
 # Canonical column order for the long-form QCM frame.
 CANONICAL_COLUMNS = ["timestamp", "sequence", "group", "fit_center", "fit_fwhm", "frequency"]
 
-# Built-in profiles, in detection-priority order (ties break by this order). Each
-# is a ``Profile`` (see base.py); external formats register via the
-# ``qcm.profiles`` entry-point group and are appended at discovery time.
-_BUILTIN_PROFILES: list[Profile] = [
-    standardized_csv.PROFILE,
-    qsoft_txt.PROFILE,
-    pstrace_cv_csv.PROFILE,
-    pstrace_csv.PROFILE,
+# Profile registry: ``(name, kind, predicate)`` in detection-priority order.
+# ``kind`` is "qcm" (a resonance source that becomes the run) or "ps" (a
+# potentiostat export merged onto a QCM source). Detection is signature-based and
+# mutually exclusive, so the first matching predicate wins. To add a format:
+# write a reader + ``is_*`` predicate in a new module, add a row here, and add an
+# elif in ``import_run`` (and optionally a golden case under tests/golden/).
+_PROFILE_REGISTRY: list[tuple[str, str, "callable"]] = [
+    ("standardized_csv", "qcm", is_standardized_csv),
+    ("qsoft_txt", "qcm", is_qsoft_txt),
+    ("pstrace_cv", "ps", is_cv_pstrace_csv),
+    ("pstrace_cp", "ps", is_pstrace_csv),
 ]
-_PROFILES_CACHE: list[Profile] | None = None
-
-
-def _discover_entry_point_profiles() -> list[Profile]:
-    """Profiles contributed by other installed packages via ``qcm.profiles``.
-
-    An entry point may point at a ``Profile`` instance or a zero-arg factory that
-    returns one. Anything that fails to load or isn't a ``Profile`` is skipped so
-    a broken plugin can't take down import.
-    """
-    found: list[Profile] = []
-    try:
-        from importlib.metadata import entry_points
-
-        eps = entry_points(group="qcm.profiles")
-    except Exception:
-        return found
-    for ep in eps:
-        try:
-            obj = ep.load()
-            prof = obj() if (callable(obj) and not isinstance(obj, Profile)) else obj
-            if isinstance(prof, Profile):
-                found.append(prof)
-        except Exception:
-            continue
-    return found
-
-
-def profiles() -> list[Profile]:
-    """All registered profiles: built-ins first, then discovered plugins (cached).
-
-    De-duplicated by ``name`` keeping the first occurrence, so a plugin can't
-    silently shadow a built-in by reusing its name (it competes on detection
-    confidence instead).
-    """
-    global _PROFILES_CACHE
-    if _PROFILES_CACHE is None:
-        seen: set[str] = set()
-        merged: list[Profile] = []
-        for prof in list(_BUILTIN_PROFILES) + _discover_entry_point_profiles():
-            if prof.name not in seen:
-                seen.add(prof.name)
-                merged.append(prof)
-        _PROFILES_CACHE = merged
-    return _PROFILES_CACHE
-
-
-def _profile_by_name(name: str) -> Profile | None:
-    return next((p for p in profiles() if p.name == name), None)
 
 
 def profile_kind(name: str) -> str | None:
     """"qcm", "ps", or "parquet" for a profile name; None if unknown."""
     if name == "parquet":
         return "parquet"
-    prof = _profile_by_name(name)
-    return prof.kind if prof else None
-
-
-def detect_profiles(source: str | Path) -> list[tuple[str, float]]:
-    """``(name, confidence)`` for every profile that recognises ``source``,
-    ranked by confidence (descending; ties keep registration order)."""
-    source = Path(source)
-    ranked: list[tuple[str, float]] = []
-    for prof in profiles():
-        try:
-            conf = float(prof.detect(source))
-        except Exception:
-            conf = 0.0
-        if conf > 0:
-            ranked.append((prof.name, conf))
-    ranked.sort(key=lambda t: t[1], reverse=True)  # stable: equal confidences keep order
-    return ranked
+    for n, kind, _ in _PROFILE_REGISTRY:
+        if n == name:
+            return kind
+    return None
 
 
 def detect_profile(source: str | Path) -> str | None:
-    """Best-matching profile name for ``source``, else ``None``.
+    """Name of the profile that matches ``source`` by signature, else ``None``.
 
     Returns ``"parquet"`` for a directory or ``.parquet`` file (the raw-ingest
-    path); otherwise the highest-confidence profile. ``None`` means unmappable —
-    the caller should warn rather than silently partial-import.
+    path); otherwise the first registry profile whose predicate accepts the file.
+    ``None`` means the file is unmappable — the caller should warn rather than
+    silently partial-import.
     """
     source = Path(source)
     if source.is_dir() or source.suffix.lower() == ".parquet":
         return "parquet"
-    ranked = detect_profiles(source)
-    return ranked[0][0] if ranked else None
+    for name, _kind, predicate in _PROFILE_REGISTRY:
+        try:
+            if predicate(source):
+                return name
+        except Exception:
+            continue
+    return None
 
 
 def _candidate_files(folder: Path) -> list[Path]:
@@ -252,15 +198,16 @@ def import_run(
             f"ps_source alongside a QCM csv/txt source, not as the run source."
         )
 
-    prof = _profile_by_name(name)
-    if prof is None or prof.kind != "qcm":
+    # Explicit per-format dispatch — readable and easy to extend for the handful
+    # of formats this tool supports. Add a new `elif` when adding a profile.
+    if name == "standardized_csv":
+        frame = read_standardized_csv(source, rename=qcm_rename)
+    elif name == "qsoft_txt":
+        frame = read_qsoft_txt(source)
+    else:
         raise ValueError(f"Unsupported QCM profile '{name}' for {source}.")
-    result = prof.read(Path(source), rename=qcm_rename)
-    frame = result.frame
 
-    # Provenance + non-fatal warnings from the profile flow into the run manifest.
-    extra_metadata: dict = dict(result.metadata)
-    import_warnings: list[str] = list(result.warnings)
+    extra_metadata: dict = {}
     cp_stream: "pl.DataFrame | None" = None
     if ps_source is not None:
         # A CV PSTrace export is potential/scan-indexed (per-scan i-vs-E blocks),
@@ -294,8 +241,6 @@ def import_run(
             cp_stream = cp_stream.with_columns(
                 (pl.col("time_s") - pl.col("time_s").min()).alias("time_s")
             )
-    if import_warnings:
-        extra_metadata["import_warnings"] = import_warnings
     with tempfile.TemporaryDirectory() as tmp:
         staged = Path(tmp) / "canonical.parquet"
         frame.write_parquet(staged)

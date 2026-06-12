@@ -85,11 +85,3 @@ def read_standardized_csv(
         frames.append(sub)
 
     return pl.concat(frames, how="vertical").sort(["timestamp", "group"])
-
-
-from .base import FunctionProfile  # noqa: E402
-
-PROFILE = FunctionProfile(
-    "standardized_csv", "qcm", is_standardized_csv,
-    lambda path, rename=None: read_standardized_csv(path, rename=rename),
-)
