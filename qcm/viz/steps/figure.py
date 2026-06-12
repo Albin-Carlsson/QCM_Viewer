@@ -49,7 +49,7 @@ class CompositeFigureStep(BaseStep):
         # Journal width presets (inches): single vs double column.
         self.width_select = pn.widgets.RadioButtonGroup(
             options={"Single column (3.4″)": 3.4, "Double column (7.2″)": 7.2},
-            value=7.2, button_type="default", sizing_mode="stretch_width",
+            value=7.2, color="default", sizing_mode="stretch_width",
         )
 
     # --- data → panel specs ------------------------------------------------
@@ -142,7 +142,7 @@ class CompositeFigureStep(BaseStep):
                                     ("⬇ PNG", "png", False)):
             dl = pn.widgets.FileDownload(
                 label=label, filename=f"qcm_composite.{fmt}", callback=self._download(fmt),
-                button_type="primary" if primary else "default",
+                color="primary" if primary else "default",
                 stylesheets=[ACCENT_BUTTON_STYLESHEET] if primary else [],
                 sizing_mode="stretch_width",
             )

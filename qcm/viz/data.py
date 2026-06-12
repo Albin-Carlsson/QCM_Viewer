@@ -13,14 +13,17 @@ from typing import Any, Callable
 
 import polars as pl
 
+from qcm.log import get_logger
 from qcm.run import QCMRun
 
 from . import echem, plots, science
 from .state import RunInfo, ViewState
-from .theme import MPE_SMOOTH_WINDOW_DEFAULT, axis, quantity
+from .theme import axis, quantity
 
 _US = 1_000_000
 _CACHE_SIZE = 64
+
+_log = get_logger("viz.data")
 
 
 class QCMViewData:
@@ -73,7 +76,14 @@ class QCMViewData:
 
     def _attach_echem(self, df: pl.DataFrame, roles: tuple[str, ...]) -> pl.DataFrame:
         """Interpolate the retained PS stream's roles onto ``df``'s timestamps at
-        the run's alignment offset, broadcasting across overtone groups."""
+        the run's alignment offset, broadcasting across overtone groups.
+
+        QCM samples outside the PS stream's recorded span get null (not a held
+        endpoint value): ``np.interp`` clamps at the ends, which would freeze
+        the last current/potential across a QCM tail recorded after the
+        potentiostat stopped — fabricating a phantom applied current that
+        corrupts cycle detection and CE. Same convention as the CV attach.
+        """
         import numpy as np
 
         null_cols = [pl.lit(None, dtype=pl.Float64).alias(r) for r in roles]
@@ -83,11 +93,14 @@ class QCMViewData:
         ps_t = stream["time_s"].to_numpy() + self.run.ps_offset_s
         ts = df["timestamp"].unique().sort()
         q_elapsed = (ts.to_numpy() - self.info.t0_us) / _US
+        inside = (q_elapsed >= ps_t[0] - 1e-9) & (q_elapsed <= ps_t[-1] + 1e-9)
         out: dict[str, Any] = {"timestamp": ts}
         for r in roles:
             if r in stream.columns:
-                out[r] = np.interp(q_elapsed, ps_t, stream[r].to_numpy())
-        echem_df = pl.DataFrame(out)
+                out[r] = np.where(inside, np.interp(q_elapsed, ps_t, stream[r].to_numpy()), np.nan)
+        echem_df = pl.DataFrame(out).with_columns(
+            pl.col(r).fill_nan(None) for r in roles if r in stream.columns
+        )
         return df.join(echem_df, on="timestamp", how="left")
 
     def clear_echem_cache(self) -> None:
@@ -111,7 +124,7 @@ class QCMViewData:
         x_axis: str | None = None,
     ) -> tuple[pl.DataFrame, float]:
         key = quantity_key or state.quantity
-        x_key = x_axis if x_axis is not None else getattr(state, "x_axis", "time")
+        x_key = x_axis if x_axis is not None else state.x_axis
         ax = axis(x_key)
         q = quantity(key)
         groups = tuple(state.groups)
@@ -125,29 +138,28 @@ class QCMViewData:
             # it in SQL instead of scanning the raw window into Python.
             base_means = self._baseline_mean(science.raw_value_sql(q), b0, b1, groups)
         out = science.compute(main, key, state.orders, baseline_means_df=base_means,
-                              params=getattr(state, "params", None))
+                              params=state.params)
         # Drift correction: subtract a per-group trend fitted over the reference
         # window (generalises baseline-mean subtraction to a linear/poly drift).
         # Only the referenced resonance family drifts meaningfully; echem and the
         # MPE derivative are left alone.
-        if getattr(state, "detrend", False) and q.kind in ("frequency", "dissipation", "mass"):
+        if state.detrend and q.kind in ("frequency", "dissipation", "mass"):
             b0, b1 = state.baseline_us(self.info.t0_us)
             ref_main = self._timeline(tuple(q.sources), b0, b1, groups)
             ref_out = science.compute(ref_main, key, state.orders, baseline_means_df=base_means,
-                                      params=getattr(state, "params", None))
+                                      params=state.params)
             out = science.detrend(out, ref_out, t0_us=self.info.t0_us,
-                                  order=getattr(state, "detrend_order", 1))
+                                  order=state.detrend_order)
         # Despike resonance-derived traces (spikes originate in the resonance
         # fit, so cell-level echem channels are left untouched).
-        if getattr(state, "despike", False) and (q.is_resonance or q.kind == "mpe"):
-            out = science.despike(out, window=getattr(state, "despike_window", 7))
+        if state.despike and (q.is_resonance or q.kind == "mpe"):
+            out = science.despike(out, window=state.despike_window)
         if key == "mpe":
-            clip = ((state.mpe_clip_lo, state.mpe_clip_hi)
-                    if getattr(state, "mpe_clip", False) else None)
+            clip = (state.mpe_clip_lo, state.mpe_clip_hi) if state.mpe_clip else None
             out = science.smooth_clip_mpe(
                 out, clip=clip,
-                smooth=getattr(state, "mpe_smooth", False),
-                window=getattr(state, "mpe_window", MPE_SMOOTH_WINDOW_DEFAULT),
+                smooth=state.mpe_smooth,
+                window=state.mpe_window,
             )
         out = self.add_elapsed(out)
         out = self._attach_x(out, ax, t0, t1, groups)
@@ -375,7 +387,7 @@ class QCMViewData:
             row = idx.filter(pl.col("sequence") == sequence)
             if not row.is_empty():
                 suffix = f" · t={(row['timestamp'][0] - self.info.t0_us) / _US:.2f} s"
-        except Exception:
-            pass
+        except Exception:  # noqa: BLE001 — cosmetic suffix; degrade but record
+            _log.exception("sequence_readout: sweep index lookup failed")
         pos = (sequence - self.info.seq_min + 1) if self.info.n_sweeps else 0
         return f"**Sweep {sequence}** ({pos}/{self.info.n_sweeps}){suffix} · _click any timeline point to jump here_"

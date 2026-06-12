@@ -62,12 +62,12 @@ class ResultsStep(BaseStep):
 
         self.technique_select = pn.widgets.RadioButtonGroup(
             label="", options={"Auto": "auto", "CV": "cv", "CP": "cp"},
-            value="auto", button_type="default", sizing_mode="stretch_width",
+            value="auto", color="default", sizing_mode="stretch_width",
             css_classes=["echem-technique-toggle"],
         )
         self.cycle_mode = pn.widgets.RadioButtonGroup(
             label="", options={"All": "all", "Single": "individual", "Range": "range"},
-            value="all", button_type="default", sizing_mode="stretch_width",
+            value="all", color="default", sizing_mode="stretch_width",
             css_classes=["echem-cycle-mode"],
         )
         self.cycle_select = pn.widgets.IntSlider(
@@ -83,11 +83,11 @@ class ResultsStep(BaseStep):
         # One-click PS↔QCM alignment: apply the estimated lag to the run's stored
         # offset (re-interpolated from the retained PS stream — no re-import).
         self.apply_offset_button = pn.widgets.Button(
-            label="Apply this offset", button_type="primary", icon="adjustments",
+            label="Apply this offset", color="primary", icon="adjustments",
             sizing_mode="stretch_width",
         )
         self.reset_offset_button = pn.widgets.Button(
-            label="Reset", button_type="default", icon="restore", width=96,
+            label="Reset", color="default", icon="restore", width=96,
         )
         self.apply_offset_button.on_click(self._apply_alignment)
         self.reset_offset_button.on_click(self._reset_alignment)

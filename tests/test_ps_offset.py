@@ -80,3 +80,32 @@ def test_offset_persists_and_shifts_derived_echem(tmp_path):
     run.set_ps_offset(0.0)
     data.clear_echem_cache()
     assert abs(potential_at(5.0) - 0.5) < 0.02
+
+
+def test_qcm_tail_beyond_ps_span_is_null_not_frozen(tmp_path):
+    """A QCM run longer than the PS recording must get nulls past the PS end.
+
+    ``np.interp`` clamps at the endpoints; un-masked that freezes the last
+    current across the tail — a phantom applied current that corrupts cycle
+    detection and CE. Regression for the held-endpoint bug.
+    """
+    # QCM records 40 s, the potentiostat only 20 s.
+    times = list(np.round(np.arange(41) * 1.0, 3))
+    csv = _write_standardized_csv(tmp_path / "qcm.csv", times=times)
+    ps = _write_pstrace_csv(tmp_path / "ps.csv", n=21)
+    run_dir = tmp_path / "run"
+    import_run(csv, run_dir, ps_source=ps)
+    run = open_run(run_dir)
+    info = RunInfo(run_id=run.id, groups=run.groups, orders=run.overtone_orders(),
+                   t0_us=run.time_start, t1_us=run.time_end, span_s=40.0,
+                   fmin=0, fmax=1, seq_min=0, seq_max=40, n_sweeps=41, has_echem=True)
+    data = QCMViewData(run, info)
+
+    wf = data.echem_waveform().sort("time_s")
+    inside = wf.filter(pl.col("time_s") <= 20.0)
+    tail = wf.filter(pl.col("time_s") > 20.5)
+    assert inside["current"].null_count() == 0
+    assert tail.height > 0
+    # The tail carries no fabricated (held) current/potential/charge.
+    assert tail["current"].null_count() == tail.height
+    assert tail["potential"].null_count() == tail.height

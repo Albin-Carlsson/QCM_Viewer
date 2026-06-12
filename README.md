@@ -117,7 +117,7 @@ run-dir/
   expressions.json         reserved for run-local derived expressions
         │  qcm.run.QCMRun  (read boundary: DuckDB + Polars)
         ▼
-qcm.viz.data.QCMViewData + qcm.viz.science / qcm.viz.echem  (pure transforms)
+qcm.viz.data.QCMViewData + qcm.science.transforms / qcm.science.echem  (pure)
         ▼
 qcm.viz.controls (widgets→state) · steps/* (page bodies) · plots.py (figures)
         ▼
@@ -127,9 +127,11 @@ qcm.viz.app.QCMViewer       (composition root)  →  qcm/panel_app.py (serve ent
 
 Key invariants:
 
-- **Pure science layer.** `qcm/viz/science.py` and `qcm/viz/echem.py` are
-  Panel-free and unit-tested. Display constants, units, the quantity registry,
-  and all science/behavior constants live in `qcm/viz/theme.py`.
+- **Pure science layer.** `qcm/science/` (transforms, echem, quantities) is
+  Panel-free and unit-tested — enforced in CI by import-linter. The quantity
+  registry and all science constants live in `qcm/science/quantities.py`;
+  display policy (colours, plot sizes) stays in `qcm/viz/`. The old
+  `qcm.viz.science`/`qcm.viz.echem` import paths remain as shims.
 - **One read path.** UI, CLI, and exported notebooks all open a `QCMRun`; nobody
   reads Parquet directly, so level-routing and baseline aggregation stay shared.
 - **Multi-run overlay.** `qcm/viz/runset.py` holds several runs (one *active*);
@@ -171,6 +173,13 @@ qcm ingest big.parquet ./run --overwrite --memory-limit 2GB --raw-part-rows 2500
 ```
 
 `qcm diagnose ./run` should report pyramid/sweep-index reads, not full raw scans.
+
+### Serving note (security)
+
+The viewer is a local, single-user tool: the landing page exposes a filesystem
+browser and an import pipeline to whoever can reach the port. Keep it on
+`localhost` (the default). Do **not** serve it on a shared network
+(`--address 0.0.0.0`) — anyone on the network could browse your files.
 
 ---
 

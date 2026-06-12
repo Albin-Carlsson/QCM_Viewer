@@ -245,7 +245,7 @@ class ViewerShell:
                  "display:flex;align-items:center;justify-content:center;}"
                  f"svg{{color:{color};stroke:{color};}}")
         pick = pn.widgets.Button(
-            icon=icon, button_type="default", width=34, margin=0, disabled=is_active,
+            icon=icon, color="default", width=34, margin=0, disabled=is_active,
             stylesheets=[sheet], css_classes=["qcm-run-active" if is_active else "qcm-run-pick"],
             description=("Active run — drives the raw & report views" if is_active
                          else "Make this the active run (raw & report views)"),
@@ -260,7 +260,7 @@ class ViewerShell:
         # The directory browser is ~600px wide and would blow out the fixed
         # sidebar, so the sidebar only carries a compact button; the browser
         # itself lives in a modal (built once, mounted at the app root).
-        open_btn = pn.widgets.Button(label="Add run", icon="plus", button_type="default",
+        open_btn = pn.widgets.Button(label="Add run", icon="plus", color="default",
                                      sizing_mode="stretch_width", css_classes=["qcm-add-run-btn"])
         open_btn.on_click(lambda _e: self._open_add_run_modal())
         return open_btn
@@ -316,7 +316,7 @@ class ViewerShell:
         )
         # Holds one Select per file column while the mapping editor is shown.
         self._col_role_selects: dict[str, pn.widgets.Select] = {}
-        add = pn.widgets.Button(label="Import & add", icon="plus", button_type="primary")
+        add = pn.widgets.Button(label="Import & add", icon="plus", color="primary")
         add.on_click(lambda _e: self._confirm_add_run())
         detected = pn.bind(self._detected_profile_html, self._run_browser.param.value,
                            self._profile_override)
@@ -471,7 +471,7 @@ class ViewerShell:
             items = []
             for i, mode in enumerate(nav.MODES):
                 btn = pn.widgets.Button(label=mode.label, icon=mode.icon,
-                                        button_type="default", sizing_mode="stretch_width")
+                                        color="default", sizing_mode="stretch_width")
                 btn.on_click(self._go(i))
                 classes = ["qcm-nav-item"] + (["is-active"] if i == active else [])
                 items.append(pn.Column(btn, nav_sublabel(mode.sublabel),
@@ -513,13 +513,13 @@ class ViewerShell:
         def _below(text: str) -> Tooltip:
             return Tooltip(content=text, position="bottom")
 
-        export_btn = pn.widgets.Button(label="Export", icon="download", button_type="primary",
+        export_btn = pn.widgets.Button(label="Export", icon="download", color="primary",
                                        description=_below("Build a shareable report and data "
                                                           "export from the current view."),
                                        stylesheets=[ACCENT_BUTTON_STYLESHEET],
                                        sizing_mode="fixed")
         export_btn.on_click(self._go(nav.mode_index("report")))
-        inspect = pn.widgets.Button(label="Inspect raw sweeps", icon="microscope", button_type="default",
+        inspect = pn.widgets.Button(label="Inspect raw sweeps", icon="microscope", color="default",
                                     description=_below("Open the raw resonance sweeps and "
                                                        "I/Q traces for QC."),
                                     sizing_mode="fixed")
@@ -700,7 +700,7 @@ class ViewerShell:
 
     # =====================================================  drawer
     def _build_drawer(self):
-        close = pn.widgets.Button(label="Close", icon="x", button_type="default")
+        close = pn.widgets.Button(label="Close", icon="x", color="default")
         close.on_click(self._close_drawer)
         qc_content = pn.bind(lambda _open: self._qc.view() if _open else pn.Spacer(height=0),
                              self.drawer_open)

@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Run directories under quoted paths** (e.g. ``viktor's data/``) broke every
+  query with a DuckDB parser error: all embedded ``read_parquet('…')`` paths now
+  go through one escaping helper (`qcm/sqlutil.py`), and the near-duplicate
+  query builders in `QCMRun` were consolidated while fixing it. Regression
+  suite: `tests/test_quoted_paths.py`.
+- **CP echem fabrication beyond the potentiostat's recording**: the sidecar
+  stream interpolation clamped at the endpoints (`np.interp`), freezing the
+  last current/potential across a QCM tail recorded after the potentiostat
+  stopped — corrupting cycle detection and CE there. Out-of-span samples are
+  now null, matching the CV attach convention.
+- **Read-only run directories**: `load_annotations` wrote an empty
+  `annotations.json` on its *read* path, crashing annotation reads on
+  read-only locations (network shares, archives). Reads no longer write.
+- **Failed imports no longer poison the destination**: `ingest` removes the
+  half-written run dir on any failure, multi-file sources copy only the
+  optional columns common to *all* files, and the DuckDB memory limit is
+  validated with a clear error instead of a SQL parser error.
+- **Silent failure surfaces**: a failed results-table CSV export no longer
+  downloads as a silently empty file (it logs and embeds the error), and
+  tap-to-jump / drag-select wiring failures are logged instead of dying
+  invisibly (the historical box-select failure mode).
+
+### Changed
+- **Pure science layer extracted to `qcm/science/`** (`transforms`, `echem`,
+  `quantities`) out of the UI namespace; `qcm.viz.science`/`qcm.viz.echem`/
+  `qcm.viz.theme` remain as compatible re-export shims. The import-linter
+  contracts got stronger: `qcm.run` and `qcm.notebooks` are now viz-free too.
+- **All small JSON writes are atomic** (temp file + rename): manifest,
+  annotations, viewer state, session, presets — a crash mid-write can no
+  longer truncate a run's metadata.
+- **`QCMRun` is closeable** (`close()` / context manager); transient CLI opens
+  release their DuckDB connections.
+- **Error policy is now machine-enforced**: ruff `BLE001` bans blind
+  `except Exception` outside the UI render surfaces; every remaining broad
+  catch is logged and carries a reasoned `noqa`.
+- **Type-checking in CI**: mypy runs on the core (models, ingest, run,
+  profiles, fileio, sqlutil, annotations, timeutil) in the arch job.
+- **Dependencies slimmed**: removed unused `datashader`; `jupyterlab`/
+  `ipykernel`/`jupyter-bokeh` moved to the optional `[notebook]` extra
+  (writing the exported .ipynb needs only `nbformat`).
+- **Deprecated `button_type=` swept to `color=`** across the UI (Panel 2.0
+  readiness); the suite now fails on any reintroduction (warnings ratchet:
+  1198 warnings → 1).
+- Golden import harness now covers **PS-paired imports** (CP sidecar + CV
+  baked columns); CI coverage floor raised 65 → 70 (suite at 73 %, 210 tests).
+
 ### Added
 - **`qcm standardize` command**: converts any supported QCM instrument export
   (e.g. a Qsoft `.txt`) into the lab's standardized wide `Time_N/Fr_N/D_N` csv,

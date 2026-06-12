@@ -4,6 +4,8 @@ from pathlib import Path
 from typing import Any, Literal
 from pydantic import BaseModel, Field
 
+from .fileio import write_text_atomic
+
 
 class TimeInfo(BaseModel):
     start: int
@@ -53,13 +55,17 @@ class Manifest(BaseModel):
         return cls.model_validate_json(path.read_text())
 
     def save(self, run_path: str | Path) -> None:
-        Path(run_path).mkdir(parents=True, exist_ok=True)
-        (Path(run_path) / "manifest.json").write_text(self.model_dump_json(indent=2))
+        # Atomic: a crash mid-write must never leave a truncated manifest —
+        # that would make the whole run unopenable.
+        write_text_atomic(Path(run_path) / "manifest.json", self.model_dump_json(indent=2))
+
+
+AnnotationType = Literal["point", "range", "reference_region", "excluded_region", "event"]
 
 
 class Annotation(BaseModel):
     id: str
-    type: Literal["point", "range", "reference_region", "excluded_region", "event"]
+    type: AnnotationType
     t0: int
     t1: int | None = None
     label: str

@@ -94,17 +94,32 @@ def _is_run_dir(path: str | Path) -> bool:
 # then renders the workbench as the initial payload — the same (fast, proven)
 # path as serving with run arguments. "resume" means rebuild from the saved
 # session; a list means open those run dirs.
+#
+# This is module-level (shared across sessions) by necessity: the browser
+# reload creates a *new* session, so per-session storage cannot carry the
+# hand-off. The viewer is a single-user local tool; the TTL below keeps a
+# stale pending value (set but never consumed, e.g. a closed tab) from
+# hijacking an unrelated later session.
 _PENDING_OPEN: list[str] | str | None = None
+_PENDING_SET_AT: float = 0.0
+_PENDING_TTL_S = 30.0
 
 
 def _set_pending(value: list[str] | str) -> None:
-    global _PENDING_OPEN
+    global _PENDING_OPEN, _PENDING_SET_AT
+    import time
+
     _PENDING_OPEN = value
+    _PENDING_SET_AT = time.monotonic()
 
 
 def _consume_pending() -> list[str] | str | None:
     global _PENDING_OPEN
+    import time
+
     value, _PENDING_OPEN = _PENDING_OPEN, None
+    if value is not None and time.monotonic() - _PENDING_SET_AT > _PENDING_TTL_S:
+        return None
     return value
 
 
@@ -130,7 +145,7 @@ def _landing():
         "Pick a run folder, or a QCM instrument file (.csv / .txt) or parquet, then Open.",
         alert_type="light", sizing_mode="stretch_width",
     )
-    open_btn = pn.widgets.Button(label="Open", button_type="primary", icon="folder-open")
+    open_btn = pn.widgets.Button(label="Open", color="primary", icon="folder-open")
 
     def _set(kind: str, msg: str) -> None:
         status.alert_type = kind
@@ -172,7 +187,7 @@ def _landing():
         if len(remembered) > 4:
             names += ", …"
         resume_btn = pn.widgets.Button(
-            label=f"Resume last session ({names})", button_type="default", icon="history",
+            label=f"Resume last session ({names})", color="default", icon="history",
         )
 
         def _resume(_event=None):

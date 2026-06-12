@@ -50,3 +50,6 @@ view_run/
 2604* baseline*/
 2605*/
 26*/
+
+# Local demo/run artefacts at the repo root (runs are user data, not source)
+/cp-run/

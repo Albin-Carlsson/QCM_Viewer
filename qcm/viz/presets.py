@@ -70,7 +70,7 @@ def delete_preset(name: str) -> dict[str, ExperimentParams]:
 
 
 def _write(presets: dict[str, ExperimentParams]) -> None:
-    path = presets_file()
-    path.parent.mkdir(parents=True, exist_ok=True)
+    from qcm.fileio import write_text_atomic
+
     payload = {name: p.to_dict() for name, p in presets.items()}
-    path.write_text(json.dumps(payload, indent=2))
+    write_text_atomic(presets_file(), json.dumps(payload, indent=2))

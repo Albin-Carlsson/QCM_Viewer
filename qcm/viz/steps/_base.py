@@ -17,8 +17,11 @@ from ..components import empty_state
 from ..controls import ViewerControls
 from ..data import QCMViewData
 from ..errors import surface_error
+from qcm.log import get_logger
 
 _US = 1_000_000
+
+_log = get_logger("viz.steps")
 
 
 class BaseStep:
@@ -139,19 +142,24 @@ class BaseStep:
             return obj
 
     def attach_tap(self, obj):
+        # A wiring failure here silently kills tap-to-jump — exactly the class
+        # of invisible breakage the error policy (ADR 0006) exists for, so it is
+        # always logged even though the plot itself still renders.
         try:
             tap = hv.streams.SingleTap(source=obj, transient=True)
             tap.add_subscriber(lambda x=None, y=None: self.actions.jump_to_seconds(x))
-        except Exception:
-            pass
+        except Exception:  # noqa: BLE001 — degrade to a non-interactive plot, loudly
+            _log.exception("attach_tap: tap-to-jump wiring failed; plot is not tappable")
         return obj
 
     def attach_brush(self, obj):
+        # Same policy as attach_tap: drag-select dying silently was the
+        # historical box-select bug — log it, keep the plot.
         try:
             bounds = hv.streams.BoundsX(source=obj)
             bounds.add_subscriber(lambda boundsx=None: self.actions.apply_brush(boundsx))
-        except Exception:
-            pass
+        except Exception:  # noqa: BLE001 — degrade to a non-interactive plot, loudly
+            _log.exception("attach_brush: drag-select wiring failed; brush is dead")
         return obj
 
     def interactive_plot(self, obj):
@@ -297,14 +305,15 @@ class BaseStep:
                 df = frame_fn()
                 if df is not None and not df.is_empty():
                     df.write_csv(buf)
-            except Exception:
-                pass
+            except Exception as exc:  # noqa: BLE001 — never hand the user a silently empty file
+                _log.exception("csv_download(%s) failed", filename)
+                buf.write(f"# export failed: {exc}\n".encode())
             buf.seek(0)
             return buf
 
         return pn.widgets.FileDownload(
             callback=_file, filename=filename, label=label,
-            button_type="default", width=150, height=30,
+            color="default", width=150, height=30,
             css_classes=["qcm-table-download"],
         )
 

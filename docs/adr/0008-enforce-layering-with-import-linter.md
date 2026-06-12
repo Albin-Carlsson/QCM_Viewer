@@ -37,3 +37,9 @@ Make the layering invariants **CI failures** with
   `qcm.viz` would let `run` join contract 3 too — future work, not blocking.
 - **Cost:** the `arch` CI job installs the package to build the import graph, so
   it is heavier than the pure-text ruff job (kept separate so ruff stays fast).
+
+## Update (2026-06)
+
+The carve-out described above is gone: the pure layer now lives in
+`qcm/science/`, so `qcm.run` and `qcm.notebooks` are held to the viz-free
+contract too, and the science contract sources read `qcm.science`.

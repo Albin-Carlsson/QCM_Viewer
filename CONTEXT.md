@@ -25,7 +25,8 @@ and docs.
   concepts (see README → Concepts). The reference range defines zero for Δ
   quantities; per run in a set, t0 alignment and baseline are independent,
   while the selection itself is shared.
-- **Quantity** — a plottable derived signal registered in `qcm/viz/theme.py`
+- **Quantity** — a plottable derived signal registered in
+  `qcm/science/quantities.py` (re-exported via `qcm/viz/theme.py`)
   (`Δf`, `Δf/n`, `ΔD`, Sauerbrey mass, current, potential, charge, MPE, …).
 - **Technique** — CV (cyclic voltammetry) or CP (chronopotentiometry /
   galvanostatic cycling), auto-detected from the waveform, overridable.

@@ -28,7 +28,7 @@ def write_analysis_notebook(
     """
     import nbformat as nbf
 
-    from .viz.theme import DEFAULT_PARAMS
+    from .science.quantities import DEFAULT_PARAMS
 
     out = Path(output)
     out.parent.mkdir(parents=True, exist_ok=True)

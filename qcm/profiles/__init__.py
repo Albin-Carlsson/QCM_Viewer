@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
+from typing import Callable
 
 from ..ingest import ingest
 from .pstrace_csv import is_pstrace_csv, read_pstrace_csv
@@ -43,7 +44,7 @@ CANONICAL_COLUMNS = ["timestamp", "sequence", "group", "fit_center", "fit_fwhm",
 # mutually exclusive, so the first matching predicate wins. To add a format:
 # write a reader + ``is_*`` predicate in a new module, add a row here, and add an
 # elif in ``import_run`` (and optionally a golden case under tests/golden/).
-_PROFILE_REGISTRY: list[tuple[str, str, "callable"]] = [
+_PROFILE_REGISTRY: list[tuple[str, str, "Callable[[str | Path], bool]"]] = [
     ("standardized_csv", "qcm", is_standardized_csv),
     ("qsoft_txt", "qcm", is_qsoft_txt),
     ("pstrace_cv", "ps", is_cv_pstrace_csv),
@@ -76,7 +77,7 @@ def detect_profile(source: str | Path) -> str | None:
         try:
             if predicate(source):
                 return name
-        except Exception:
+        except Exception:  # noqa: BLE001 — detection by elimination: unreadable ⇒ not this profile
             continue
     return None
 
@@ -220,10 +221,10 @@ def import_run(
             # what was used and where it came from for the run-info readout.
             if cv_scan_rate:
                 rate, rate_source = float(cv_scan_rate), "user override"
-            elif scan_rate_from_filename(ps_source):
-                rate, rate_source = scan_rate_from_filename(ps_source), "PS filename"
-            elif scan_rate_from_filename(source):
-                rate, rate_source = scan_rate_from_filename(source), "QCM filename"
+            elif (ps_rate := scan_rate_from_filename(ps_source)) is not None:
+                rate, rate_source = ps_rate, "PS filename"
+            elif (qcm_rate := scan_rate_from_filename(source)) is not None:
+                rate, rate_source = qcm_rate, "QCM filename"
             else:
                 rate, rate_source = DEFAULT_CV_SCAN_RATE, "default (assumed)"
             frame = attach_cv_echem(frame, read_cv_pstrace_csv(ps_source), scan_rate=rate)

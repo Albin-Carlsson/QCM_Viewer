@@ -36,7 +36,7 @@ def is_standardized_csv(path: str | Path) -> bool:
     """True when the file's header carries at least one ``Fr_N``/``D_N`` pair."""
     try:
         header = pl.read_csv(path, n_rows=0).columns
-    except Exception:
+    except Exception:  # noqa: BLE001 — sniffing: any parse error means 'not this format'
         return False
     return bool(_overtones(header))
 
@@ -66,6 +66,7 @@ def write_standardized_csv(frame: pl.DataFrame, path: str | Path) -> Path:
             )
         )
         wide = sub if wide is None else wide.join(sub, on="sequence", how="full", coalesce=True)
+    assert wide is not None  # overtones is non-empty, so the loop ran
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
     wide.sort("sequence").drop("sequence").write_csv(out)

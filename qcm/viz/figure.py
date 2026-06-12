@@ -76,7 +76,7 @@ def composite_figure(
         fig.suptitle(title, fontsize=11, y=0.995)
     try:
         fig.align_ylabels(axes)
-    except Exception:
+    except Exception:  # noqa: BLE001 — purely cosmetic alignment; never block the export
         pass
     fig.tight_layout()
     return fig

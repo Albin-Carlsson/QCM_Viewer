@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 import uuid
 from pathlib import Path
-from .models import Annotation
+from .fileio import write_text_atomic
+from .models import Annotation, AnnotationType
 from .timeutil import now_iso
 
 
@@ -12,20 +13,25 @@ def _path(run_path: str | Path) -> Path:
 
 
 def load_annotations(run_path: str | Path) -> list[Annotation]:
+    """All annotations of a run; a missing file is simply an empty list.
+
+    Read-only: never writes. Runs are routinely opened from read-only
+    locations (network shares, archived data), and a read must not fail there.
+    """
     p = _path(run_path)
     if not p.exists():
-        p.write_text("[]")
+        return []
     raw = json.loads(p.read_text())
     return [Annotation.model_validate(x) for x in raw]
 
 
 def save_annotations(run_path: str | Path, anns: list[Annotation]) -> None:
-    _path(run_path).write_text(json.dumps([a.model_dump() for a in anns], indent=2))
+    write_text_atomic(_path(run_path), json.dumps([a.model_dump() for a in anns], indent=2))
 
 
 def create_annotation(
     run_path: str | Path,
-    type: str,
+    type: "AnnotationType",
     t0: int,
     label: str,
     t1: int | None = None,

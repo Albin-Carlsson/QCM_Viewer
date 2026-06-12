@@ -43,3 +43,10 @@ Two hard layering rules:
 
 [0006]: 0006-ui-error-policy.md
 [0008]: 0008-enforce-layering-with-import-linter.md
+
+## Update (2026-06)
+
+The pure layer was relocated out of the `qcm.viz` namespace into `qcm/science/`
+(`transforms.py`, `echem.py`, `quantities.py`); `qcm.viz.science` and
+`qcm.viz.echem` remain as import shims. The decision itself is unchanged —
+this update only moves where the pure code lives.

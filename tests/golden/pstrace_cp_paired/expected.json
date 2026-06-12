@@ -1,0 +1,13 @@
+{
+  "profile": "standardized_csv",
+  "kind": "qcm",
+  "ps_profile": "pstrace_cp",
+  "groups": [
+    1,
+    3
+  ],
+  "capabilities": [
+    "echem"
+  ],
+  "echem_sidecar": true
+}

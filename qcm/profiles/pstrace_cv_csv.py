@@ -57,7 +57,7 @@ def is_cv_pstrace_csv(path: str | Path) -> bool:
     try:
         _find_cv_header(_decode(path).splitlines()[:40])
         return True
-    except Exception:
+    except Exception:  # noqa: BLE001 — sniffing: any parse error means 'not this format'
         return False
 
 

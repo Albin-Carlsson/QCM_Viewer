@@ -70,7 +70,7 @@ def is_pstrace_csv(path: str | Path) -> bool:
         text = _decode(path)
         _find_header(text.splitlines()[:40])
         return True
-    except Exception:
+    except Exception:  # noqa: BLE001 — sniffing: any parse error means 'not this format'
         return False
 
 
@@ -108,6 +108,13 @@ def read_pstrace_csv(path: str | Path) -> pl.DataFrame:
 
 def attach_echem(qcm_frame: pl.DataFrame, ps: pl.DataFrame, offset_s: float = 0.0) -> pl.DataFrame:
     """Interpolate PS signals onto a QCM run's timestamps and join them in.
+
+    **Superseded on the production path**: CP imports now retain the raw PS
+    stream as a run sidecar (``echem.parquet``) and the data layer interpolates
+    it at read time at the manifest's alignment offset (see
+    ``qcm.viz.data.QCMViewData._attach_echem``), so re-alignment never needs a
+    re-import. This function remains as the reference implementation exercised
+    by the import tests.
 
     Both streams are zeroed at their first sample; ``offset_s`` then shifts the
     PS stream before interpolation (positive = PS later). Each unique QCM

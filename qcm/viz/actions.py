@@ -45,14 +45,14 @@ class ViewerActions:
             label="⬇ Current range data (.parquet)",
             filename="qcm_current_range_data.parquet",
             callback=self.data_file,
-            button_type="default",
+            color="default",
             sizing_mode="stretch_width",
         )
         self.export_nb_dl = pn.widgets.FileDownload(
             label="⬇ Notebook for chosen region",
             filename="qcm_region_analysis.ipynb",
             callback=self.notebook_file,
-            button_type="primary",
+            color="primary",
             stylesheets=[ACCENT_BUTTON_STYLESHEET],
             sizing_mode="stretch_width",
         )

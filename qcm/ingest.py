@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import shutil
 from pathlib import Path
 import pyarrow as pa
@@ -7,6 +8,7 @@ import duckdb
 import pyarrow.parquet as pq
 
 from .models import Manifest, PathsInfo, TimeInfo
+from .sqlutil import sql_path as _sql_path
 from .timeutil import now_iso
 
 # The minimal contract every run must satisfy: a timestamp, a sweep id, an
@@ -100,11 +102,6 @@ LEVELS = {
 }
 
 
-def _sql_path(path: str | Path) -> str:
-    """DuckDB SQL string literal for a filesystem path/glob."""
-    return str(path).replace("'", "''")
-
-
 def _source_files(source: Path) -> list[Path]:
     files = sorted(source.glob("*.parquet")) if source.is_dir() else [source]
     if not files:
@@ -133,11 +130,17 @@ def _copy_raw_in_parts(files: list[Path], raw_out: Path, *, rows_per_part: int) 
     Arrow batches into ``raw/part-XXXXX.parquet`` files. Later DuckDB queries can
     prune columns and row groups instead of forcing the UI to scan one giant in-
     memory frame.
+
+    Optional columns are copied only when **every** source file carries them —
+    reading per-file would either crash mid-copy (a later file missing the
+    column) or produce parts with mismatched schemas.
     """
     raw_out.mkdir(parents=True, exist_ok=True)
     part = 0
     rows = 0
     schema_names = set(pq.read_schema(files[0]).names)
+    for f in files[1:]:
+        schema_names &= set(pq.read_schema(f).names)
     copy_columns = REQUIRED + [c for c in OPTIONAL if c in schema_names]
     for src in files:
         pf = pq.ParquetFile(src)
@@ -155,12 +158,22 @@ def _copy_raw_in_parts(files: list[Path], raw_out: Path, *, rows_per_part: int) 
     return rows
 
 
+# Accepted memory-limit spellings: "2GB", "512 MB", "1.5GiB", "4G" …
+_MEMORY_LIMIT_RE = re.compile(r"^\s*\d+(\.\d+)?\s*(B|[KMGT]i?B?)?\s*$", re.IGNORECASE)
+
+
 def _duckdb_conn(memory_limit: str | None = None) -> duckdb.DuckDBPyConnection:
     conn = duckdb.connect(database=":memory:")
     conn.execute("PRAGMA threads = 4")
     if memory_limit:
         # Example: "2GB", "8GB". DuckDB spills when needed instead of letting
-        # a large import exhaust the Python process.
+        # a large import exhaust the Python process. Validated before being
+        # embedded in the SET statement (no parameter binding for pragmas) so a
+        # typo fails with a clear message rather than a SQL parser error.
+        if not _MEMORY_LIMIT_RE.match(str(memory_limit)):
+            raise ValueError(
+                f"Invalid memory limit {memory_limit!r}; expected e.g. '2GB', '512MB'."
+            )
         conn.execute(f"SET memory_limit = '{memory_limit}'")
     return conn
 
@@ -171,12 +184,15 @@ def _raw_glob(dest: Path) -> str:
 
 def _metadata(conn: duckdb.DuckDBPyConnection, dest: Path) -> tuple[int, int, list[int], int]:
     raw = _raw_glob(dest)
-    t0, t1, rows = conn.execute(
+    row = conn.execute(
         f"""
         SELECT min(timestamp)::BIGINT, max(timestamp)::BIGINT, count(*)::BIGINT
         FROM read_parquet('{raw}')
         """
     ).fetchone()
+    if row is None or row[0] is None:
+        raise ValueError(f"Source contains no rows: {dest}")
+    t0, t1, rows = row
     groups = [int(r[0]) for r in conn.execute(
         f"SELECT DISTINCT \"group\" FROM read_parquet('{raw}') ORDER BY \"group\""
     ).fetchall()]
@@ -310,39 +326,48 @@ def ingest(
     files = _source_files(source)
     cols = _validate_schema(files)
 
-    rows_copied = _copy_raw_in_parts(files, dest / "raw", rows_per_part=max(50_000, int(raw_part_rows)))
+    # A failure below must not leave a half-written run: it would poison the
+    # destination (subsequent imports refuse it without --overwrite) and could
+    # be mistaken for a real run. Remove what we created and re-raise.
+    try:
+        rows_copied = _copy_raw_in_parts(files, dest / "raw", rows_per_part=max(50_000, int(raw_part_rows)))
 
-    conn = _duckdb_conn(memory_limit)
-    t0, t1, groups, rows = _metadata(conn, dest)
-    build_sweep_index(conn, dest)
-    build_pyramid(conn, dest)
-    conn.close()
+        conn = _duckdb_conn(memory_limit)
+        try:
+            t0, t1, groups, rows = _metadata(conn, dest)
+            build_sweep_index(conn, dest)
+            build_pyramid(conn, dest)
+        finally:
+            conn.close()
 
-    (dest / "annotations.json").write_text("[]")
-    (dest / "expressions.json").write_text("{}")
+        (dest / "annotations.json").write_text("[]")
+        (dest / "expressions.json").write_text("{}")
 
-    metadata = {
-        "rows": rows,
-        "raw_parts": len(list((dest / "raw").glob("*.parquet"))),
-        "raw_part_rows": int(raw_part_rows),
-        "rows_copied": rows_copied,
-        "optimized_for_large_files": True,
-        "raw_columns_present": [c for c in RAW_OPTIONAL if c in cols],
-    }
-    if extra_metadata:
-        metadata.update(extra_metadata)
-    manifest = Manifest(
-        run_id=dest.name,
-        created_at=now_iso(),
-        source_path=source_label or str(source),
-        time=TimeInfo(start=t0, end=t1),
-        columns=cols,
-        groups=[int(g) for g in groups],
-        pyramid_levels=list(LEVELS.keys()),
-        paths=PathsInfo(),
-        metadata=metadata,
-        capabilities=derive_capabilities(cols),
-        units=units_for(cols),
-    )
-    manifest.save(dest)
+        metadata = {
+            "rows": rows,
+            "raw_parts": len(list((dest / "raw").glob("*.parquet"))),
+            "raw_part_rows": int(raw_part_rows),
+            "rows_copied": rows_copied,
+            "optimized_for_large_files": True,
+            "raw_columns_present": [c for c in RAW_OPTIONAL if c in cols],
+        }
+        if extra_metadata:
+            metadata.update(extra_metadata)
+        manifest = Manifest(
+            run_id=dest.name,
+            created_at=now_iso(),
+            source_path=source_label or str(source),
+            time=TimeInfo(start=t0, end=t1),
+            columns=cols,
+            groups=[int(g) for g in groups],
+            pyramid_levels=list(LEVELS.keys()),
+            paths=PathsInfo(),
+            metadata=metadata,
+            capabilities=derive_capabilities(cols),
+            units=units_for(cols),
+        )
+        manifest.save(dest)
+    except BaseException:
+        shutil.rmtree(dest, ignore_errors=True)
+        raise
     return dest

@@ -139,10 +139,10 @@ def import_cmd(
         raw_part_rows=raw_part_rows,
         memory_limit=memory_limit,
     )
-    run = open_run(out)
-    kind = "raw" if run.has_raw else "fit-only"
-    echem = " + echem" if "echem" in run.capabilities else ""
-    console.print(f"Imported {kind}{echem} run: {out} ({len(run.groups)} overtone channels)")
+    with open_run(out) as run:
+        kind = "raw" if run.has_raw else "fit-only"
+        echem = " + echem" if "echem" in run.capabilities else ""
+        console.print(f"Imported {kind}{echem} run: {out} ({len(run.groups)} overtone channels)")
 
 
 @app.command()
@@ -177,7 +177,7 @@ def diagnose(run_path: Path):
             else:
                 tic_df, tic_meta = run.timeline(["fit_center"], level=level, include_meta=True)
             bench.add_row(level, str(tic_df.height), f"{tic_meta.elapsed_ms:.1f} ms", "OK")
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — diagnose reports failures, it doesn't crash on them
             bench.add_row(level, "-", "-", f"FAILED: {exc}")
     console.print(bench)
 
@@ -186,8 +186,8 @@ def diagnose(run_path: Path):
 
 @app.command()
 def notebook(run_path: Path, output: Path = Path("qcm_view.ipynb")):
-    run = open_run(run_path)
-    out = run.to_notebook(output)
+    with open_run(run_path) as run:
+        out = run.to_notebook(output)
     console.print(f"Wrote notebook: {out}")
 
 
@@ -227,8 +227,8 @@ def standardize(
 
 @app.command("export-data")
 def export_data(run_path: Path, output: Path, columns: list[str] = typer.Option(["fit_center", "fit_fwhm"]), fmt: str = "parquet"):
-    run = open_run(run_path)
-    out = run.export_data(output, columns=columns, fmt=fmt)
+    with open_run(run_path) as run:
+        out = run.export_data(output, columns=columns, fmt=fmt)
     console.print(f"Exported: {out}")
 
 

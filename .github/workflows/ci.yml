@@ -44,6 +44,8 @@ jobs:
         run: uv pip install --system -e ".[dev]"
       - name: Enforce layering contracts
         run: lint-imports
+      - name: Type-check the core (mypy)
+        run: mypy
 
   test:
     name: Tests (${{ matrix.os }} · py${{ matrix.python-version }})
@@ -67,4 +69,4 @@ jobs:
       - name: Install package + dev deps
         run: uv pip install --system -e ".[dev]"
       - name: Run tests
-        run: python -m pytest -q --cov=qcm --cov-report=term-missing --cov-fail-under=65
+        run: python -m pytest -q --cov=qcm --cov-report=term-missing --cov-fail-under=70

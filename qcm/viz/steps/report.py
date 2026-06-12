@@ -56,13 +56,13 @@ class ReportStep(BaseStep):
         )
         self.data_dl = pn.widgets.FileDownload(
             label="⬇ Current range data", filename="qcm_current_range.parquet",
-            callback=self._data_file, button_type="primary", sizing_mode="stretch_width",
+            callback=self._data_file, color="primary", sizing_mode="stretch_width",
             stylesheets=[ACCENT_BUTTON_STYLESHEET],
         )
         self.data_format.param.watch(self._on_format, "value")
         self.report_html_dl = pn.widgets.FileDownload(
             label="⬇ Download report (HTML)", filename="qcm_report.html",
-            callback=self._report_html_file, button_type="primary", sizing_mode="stretch_width",
+            callback=self._report_html_file, color="primary", sizing_mode="stretch_width",
             stylesheets=[ACCENT_BUTTON_STYLESHEET],
         )
 

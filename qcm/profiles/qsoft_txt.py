@@ -36,7 +36,7 @@ def is_qsoft_txt(path: str | Path) -> bool:
     """True when the file is tab-separated with ``f{n}_``/``D{n}_`` headers."""
     try:
         header = pl.read_csv(path, separator="\t", n_rows=0).columns
-    except Exception:
+    except Exception:  # noqa: BLE001 — sniffing: any parse error means 'not this format'
         return False
     return bool(_overtones(header))
 

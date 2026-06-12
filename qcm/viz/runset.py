@@ -21,6 +21,7 @@ from pathlib import Path
 
 import polars as pl
 
+from qcm.log import get_logger
 from qcm.run import QCMRun, open_run
 
 from . import echem
@@ -28,6 +29,8 @@ from .data import QCMViewData
 from .state import RunInfo, ViewState
 
 _US = 1_000_000
+
+_log = get_logger("viz.runset")
 
 # Where the last workspace (run paths + labels + active run) is remembered, so
 # a comparison session survives an app restart. Override with QCM_SESSION_FILE
@@ -54,7 +57,8 @@ def read_run_info(run: QCMRun) -> RunInfo:
         seq_min = int(idx["sequence"].min())
         seq_max = int(idx["sequence"].max())
         n_sweeps = int(idx["sequence"].n_unique())
-    except Exception:
+    except Exception:  # noqa: BLE001 — fit-only runs lack these columns; degrade, log
+        _log.debug("read_run_info: no raw sweep stats for %s (fit-only run?)", run.path)
         fmin, fmax = 0.0, 1.0
         seq_min = seq_max = n_sweeps = 0
     return RunInfo(
@@ -150,11 +154,11 @@ class RunSet:
 
     def save_session(self, path: str | Path | None = None) -> Path | None:
         """Remember this workspace; best-effort (never raises into the UI)."""
+        from qcm.fileio import write_text_atomic
+
         target = Path(path) if path else session_file()
         try:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(json.dumps(self.to_session(), indent=2))
-            return target
+            return write_text_atomic(target, json.dumps(self.to_session(), indent=2))
         except OSError:
             return None
 
@@ -282,6 +286,15 @@ class ActiveRunView:
     def __getattr__(self, name):
         return getattr(self._rs.active, name)
 
+    def __setattr__(self, name, value):
+        # Assignment through the proxy would silently land on the proxy object
+        # (not the active run) and vanish on the next active-run flip — always a
+        # bug. Mutate runset.active directly instead.
+        raise AttributeError(
+            f"ActiveRunView is read-only (tried to set {name!r}); "
+            "mutate runset.active instead."
+        )
+
 
 class ActiveAttrProxy:
     """Follow one attribute of the active run (e.g. its ``run`` or ``info``)."""
@@ -291,3 +304,9 @@ class ActiveAttrProxy:
 
     def __getattr__(self, name):
         return getattr(self._get(), name)
+
+    def __setattr__(self, name, value):
+        raise AttributeError(
+            f"ActiveAttrProxy is read-only (tried to set {name!r}); "
+            "mutate the proxied object directly."
+        )

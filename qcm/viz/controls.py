@@ -144,7 +144,7 @@ class ViewerControls:
             label="Visible channels",
             options=group_options,
             value=saved_groups or [str(g) for g in self.info.groups],
-            button_type="default",
+            color="default",
             orientation="vertical",
             sizing_mode="stretch_width",
             css_classes=["channel-toggles"],
@@ -152,7 +152,7 @@ class ViewerControls:
         self.group_select.param.watch(self._keep_one_channel_selected, "value")
         self.show_all_channels_button = pn.widgets.Button(
             label="Show all channels",
-            button_type="default",
+            color="default",
             icon="eye",
             sizing_mode="stretch_width",
         )
@@ -162,21 +162,21 @@ class ViewerControls:
         self.overtone_normalize: dict[int, pn.widgets.Checkbox] = {}
         self.overtone_frequency_all_button = pn.widgets.Button(
             label="All",
-            button_type="default",
+            color="default",
             width=46,
             height=26,
             css_classes=["overtone-all-toggle"],
         )
         self.overtone_dissipation_all_button = pn.widgets.Button(
             label="All",
-            button_type="default",
+            color="default",
             width=46,
             height=26,
             css_classes=["overtone-all-toggle"],
         )
         self.overtone_normalize_all_button = pn.widgets.Button(
             label="All",
-            button_type="default",
+            color="default",
             width=46,
             height=26,
             css_classes=["overtone-all-toggle"],
@@ -264,7 +264,7 @@ class ViewerControls:
         )
         self.t_full_range_button = pn.widgets.Button(
             label="Full range",
-            button_type="default",
+            color="default",
             icon="arrows-maximize",
             sizing_mode="stretch_width",
         )
@@ -297,7 +297,7 @@ class ViewerControls:
         )
         self.baseline_full_range_button = pn.widgets.Button(
             label="Use full run as zero",
-            button_type="default",
+            color="default",
             icon="arrows-maximize",
             sizing_mode="stretch_width",
         )
@@ -306,7 +306,7 @@ class ViewerControls:
         # the data). A suggestion the user can accept or nudge — never silent.
         self.suggest_baseline_button = pn.widgets.Button(
             label="Suggest stable window",
-            button_type="default",
+            color="default",
             icon="wand",
             sizing_mode="stretch_width",
             description="Find the flattest stretch near the start of the run and "
@@ -340,7 +340,7 @@ class ViewerControls:
         )
         self.mark_full_range_button = pn.widgets.Button(
             label="Use full run",
-            button_type="default",
+            color="default",
             icon="arrows-maximize",
             sizing_mode="stretch_width",
         )
@@ -368,7 +368,7 @@ class ViewerControls:
             label="Draw on plot",
             options={"Analysis range": "current", "Reference range": "reference", "Mark range": "mark"},
             value="current",
-            button_type="default",
+            color="default",
             sizing_mode="stretch_width",
             description="Choose what dragging on the plot edits: the analysis range, "
                         "the reference (baseline) range, or a span to save as a phase.",
@@ -471,13 +471,13 @@ class ViewerControls:
         )
         self.previous_sweep_button = pn.widgets.Button(
             label="Previous",
-            button_type="default",
+            color="default",
             icon="chevron-left",
             sizing_mode="stretch_width",
         )
         self.next_sweep_button = pn.widgets.Button(
             label="Next",
-            button_type="default",
+            color="default",
             icon="chevron-right",
             sizing_mode="stretch_width",
         )
@@ -491,7 +491,7 @@ class ViewerControls:
                 "One channel": "single group",
             },
             value=self.saved.get("sweep_mode", "selected overtones"),
-            button_type="default",
+            color="default",
             sizing_mode="stretch_width",
         )
         self.group_for_single = pn.widgets.Select(
@@ -534,13 +534,13 @@ class ViewerControls:
 
         self.mark_point_button = pn.widgets.Button(
             label="Mark event",
-            button_type="default",
+            color="default",
             icon="map-pin",
             sizing_mode="stretch_width",
         )
         self.mark_window_button = pn.widgets.Button(
             label="Save phase",
-            button_type="primary",
+            color="primary",
             icon="brackets-contain",
             sizing_mode="stretch_width",
         )
@@ -560,20 +560,20 @@ class ViewerControls:
 
         self.use_selection_as_baseline = pn.widgets.Button(
             label="Set reference = current range",
-            button_type="primary",
+            color="primary",
             icon="anchor",
             sizing_mode="stretch_width",
         )
         self.revert_baseline = pn.widgets.Button(
             label="Undo zero change",
-            button_type="default",
+            color="default",
             icon="history",
             disabled=True,
             sizing_mode="stretch_width",
         )
         self.save_state_button = pn.widgets.Button(
             label="Save view",
-            button_type="default",
+            color="default",
             icon="device-floppy",
             description="Save the current selections, axes, and ranges to this run "
                         "so they're restored next time you open it.",
@@ -759,7 +759,7 @@ class ViewerControls:
             sizing_mode="stretch_width",
         )
         self.param_f0_apply = pn.widgets.Button(
-            label="Set sensitivity from f₀", button_type="default", icon="calculator",
+            label="Set sensitivity from f₀", color="default", icon="calculator",
             sizing_mode="stretch_width",
         )
         self.param_f0_apply.on_click(self._apply_sensitivity_from_f0)
@@ -775,11 +775,11 @@ class ViewerControls:
             label="", placeholder="Name this preset…", sizing_mode="stretch_width",
         )
         self.preset_save = pn.widgets.Button(
-            label="Save preset", button_type="default", icon="device-floppy",
+            label="Save preset", color="default", icon="device-floppy",
             sizing_mode="stretch_width",
         )
         self.preset_delete = pn.widgets.Button(
-            label="", button_type="default", icon="trash", width=44,
+            label="", color="default", icon="trash", width=44,
             description="Delete the selected preset.",
         )
         self.preset_select.param.watch(self._apply_preset, "value")
@@ -1189,7 +1189,7 @@ class ViewerControls:
         """Return a fresh reset button so the same widget is not mounted twice."""
         button = pn.widgets.Button(
             label=name,
-            button_type="default",
+            color="default",
             icon="refresh",
             sizing_mode="stretch_width",
         )
