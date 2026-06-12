@@ -80,6 +80,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   echem are unchanged.
 
 ### Fixed
+- Raw resonance-sweep exports **without I/Q** (conductance/susceptance-only, e.g.
+  a custom acquisition tool's parquet) are now recognised as raw runs — the
+  sweep/waterfall inspector is available instead of the run being mistaken for
+  fit-only. `has_raw` keys off any per-point measured signal (I/Q *or*
+  conductance/susceptance), and the I/Q scatter degrades to a clear
+  "No I/Q traces in this export" note rather than erroring.
 - Box-select brushing and typed Start/End range edits now apply (the programmatic
   `value_throttled` write is wrapped in `edit_constant`, which previously raised
   server-side and silently dropped the gesture).

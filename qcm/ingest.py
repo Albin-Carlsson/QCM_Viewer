@@ -30,9 +30,14 @@ ECHEM_OPTIONAL = ["potential", "current", "charge", "cycle", "cycle_time"]
 # All optional columns, in copy order.
 OPTIONAL = RAW_OPTIONAL + ECHEM_OPTIONAL
 
-# A run is considered to carry raw frequency-point data when this column is
-# present; raw-only UI surfaces key off it.
-RAW_MARKER = "raw_i"
+# A run carries raw frequency-point *sweep* data when it has per-point measured
+# signals — the I/Q pair and/or the conductance/susceptance traces — not just the
+# fitted resonance. Any of these enables the sweep/waterfall inspector (the I/Q
+# scatter additionally needs raw_i/raw_q and degrades gracefully without them).
+# Tools that export resonance sweeps without I/Q (e.g. conductance-only) are still
+# recognised as raw, instead of being mistaken for fit-only.
+RAW_MARKER = "raw_i"  # legacy single marker; see RAW_SWEEP_MARKERS
+RAW_SWEEP_MARKERS = ("raw_i", "raw_q", "conductance", "susceptance")
 
 # Backwards-compatible alias.
 REQUIRED = CORE_REQUIRED
@@ -271,7 +276,7 @@ def ingest(
     (dest / "annotations.json").write_text("[]")
     (dest / "expressions.json").write_text("{}")
 
-    has_raw = RAW_MARKER in cols
+    has_raw = any(c in cols for c in RAW_SWEEP_MARKERS)
     metadata = {
         "rows": rows,
         "raw_parts": len(list((dest / "raw").glob("*.parquet"))),

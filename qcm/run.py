@@ -102,7 +102,9 @@ class QCMRun:
         flag = self.manifest.metadata.get("has_raw")
         if flag is not None:
             return bool(flag)
-        return "raw_i" in self.columns
+        # Legacy runs (pre-flag): raw sweep data = any per-point measured signal
+        # (I/Q or conductance/susceptance), not just the fitted resonance.
+        return any(c in self.columns for c in ("raw_i", "raw_q", "conductance", "susceptance"))
 
     def overtone_orders(self) -> dict[int, int]:
         """Infer the overtone order n for each group from resonance frequencies.

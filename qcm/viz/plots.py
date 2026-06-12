@@ -1500,6 +1500,10 @@ def _zoom_scale_markers_hook(ref_x_span: float, ref_y_span: float, max_scale: fl
 def iq_scatter(df: pl.DataFrame, title: str):
     if df.is_empty():
         return empty("No I/Q")
+    # Sweep exports without the raw I/Q pair (e.g. conductance-only resonance
+    # sweeps) still drive the other raw views; say so here instead of erroring.
+    if "raw_i" not in df.columns or "raw_q" not in df.columns:
+        return empty("No I/Q traces in this export")
     # Native (non-rasterized) markers so each point stays crisp and inspectable;
     # the I/Q cloud is small (tens of points per sweep). Markers are pixel-sized,
     # so _zoom_scale_markers_hook grows them as you zoom in to keep the cloud
