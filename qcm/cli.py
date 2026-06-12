@@ -191,6 +191,40 @@ def notebook(run_path: Path, output: Path = Path("qcm_view.ipynb")):
     console.print(f"Wrote notebook: {out}")
 
 
+@app.command()
+def standardize(
+    source: Path = typer.Argument(..., help="A QCM instrument export, e.g. a Qsoft .txt."),
+    output: Path | None = typer.Argument(
+        None, help="Output csv path. Defaults to the source path with a .csv suffix."
+    ),
+):
+    """Convert an instrument export to the lab's standardized csv.
+
+    Reads any supported QCM source (Qsoft .txt, variant csv) and writes the
+    wide ``Time_N, Fr_N, D_N`` exchange format next to it — the notebook's
+    data-standardization step, for tooling that expects that shape. The viewer
+    itself does not need this: it imports instrument files directly.
+    """
+    from .profiles import detect_profile, profile_kind
+    from .profiles.qsoft_txt import read_qsoft_txt
+    from .profiles.standardized_csv import read_standardized_csv, write_standardized_csv
+
+    name = detect_profile(source)
+    if name is None or profile_kind(name) != "qcm":
+        raise typer.BadParameter(
+            f"{source} is not a recognized QCM export. Supported: Qsoft .txt "
+            f"(f{{n}}_/D{{n}}_ columns) and standardized csv (Time_N/Fr_N/D_N)."
+        )
+    out = output or source.with_suffix(".csv")
+    if out.resolve() == source.resolve():
+        raise typer.BadParameter(
+            f"{source} is already a csv; pass an explicit output path to rewrite it."
+        )
+    frame = read_qsoft_txt(source) if name == "qsoft_txt" else read_standardized_csv(source)
+    write_standardized_csv(frame, out)
+    console.print(f"Standardized csv: {out}")
+
+
 @app.command("export-data")
 def export_data(run_path: Path, output: Path, columns: list[str] = typer.Option(["fit_center", "fit_fwhm"]), fmt: str = "parquet"):
     run = open_run(run_path)

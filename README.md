@@ -158,6 +158,7 @@ qcm demo-data <dir> [--preset small|long] [--technique cv|cp]
 qcm diagnose <run-dir>           # data-level routing / performance check
 qcm notebook <run-dir> [out.ipynb]
 qcm export-data <run-dir> <out> [--fmt parquet|csv]
+qcm standardize <qsoft.txt> [out.csv]      # instrument export → standardized Time_N/Fr_N/D_N csv
 ```
 
 ### Large files

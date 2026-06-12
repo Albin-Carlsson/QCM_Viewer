@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`qcm standardize` command**: converts any supported QCM instrument export
+  (e.g. a Qsoft `.txt`) into the lab's standardized wide `Time_N/Fr_N/D_N` csv,
+  written next to the source by default — the reference notebook's
+  data-standardization cell as a one-liner, for tooling outside the viewer
+  (`write_standardized_csv` in `qcm/profiles/standardized_csv.py`). The viewer
+  itself still imports instrument files directly with no intermediate file.
 - **Architecture enforcement** (Phase 2): import-linter contracts
   (`[tool.importlinter]`) make the ADR layering invariants CI failures — the
   pure science layer (`qcm.viz.science`/`echem`) and the core data/IO modules

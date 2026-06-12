@@ -41,6 +41,37 @@ def is_standardized_csv(path: str | Path) -> bool:
     return bool(_overtones(header))
 
 
+def write_standardized_csv(frame: pl.DataFrame, path: str | Path) -> Path:
+    """Write a canonical long-form QCM frame as a standardized wide csv.
+
+    The inverse of :func:`read_standardized_csv`: one row per sweep with a
+    ``Time_N, Fr_N, D_N`` triple per overtone order N — the lab's shared exchange
+    format, so any imported source (e.g. a Qsoft .txt) can be handed to tooling
+    that expects the standardized shape. Dissipation is recovered from the
+    linewidth as ``D_ppm = fit_fwhm / fit_center * 1e6``.
+    """
+    overtones = sorted(int(n) for n in frame["group"].unique().to_list())
+    if not overtones:
+        raise ValueError("Frame has no overtone groups to write.")
+    wide: pl.DataFrame | None = None
+    for n in overtones:
+        sub = (
+            frame.filter(pl.col("group") == n)
+            .sort("sequence")
+            .select(
+                pl.col("sequence"),
+                (pl.col("timestamp") / _US).alias(f"Time_{n}"),
+                pl.col("fit_center").alias(f"Fr_{n}"),
+                (pl.col("fit_fwhm") / pl.col("fit_center") * _US).alias(f"D_{n}"),
+            )
+        )
+        wide = sub if wide is None else wide.join(sub, on="sequence", how="full", coalesce=True)
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    wide.sort("sequence").drop("sequence").write_csv(out)
+    return out
+
+
 def read_standardized_csv(
     path: str | Path, *, rename: dict[str, str] | None = None,
 ) -> pl.DataFrame:

@@ -47,11 +47,11 @@ and how to *improve on* (not just match) each step.
 
 | Notebook step | Today in the notebook | Viewer status | How the viewer must beat it |
 |---|---|---|---|
-| Qsoft `.txt` → standardized CSV (regex header mapping, decimal comma) | Hand-edited path in a script; intermediate CSV written next to source | ✅ `qsoft_txt` profile, auto-detected, no intermediate file | Done. Keep the notebook's spirit: **never break on a new header variant silently** — show the detected mapping and let the user remap (partially exists). |
+| Qsoft `.txt` → standardized CSV (regex header mapping, decimal comma) | Hand-edited path in a script; intermediate CSV written next to source | ✅ `qsoft_txt` profile, auto-detected, no intermediate file; `qcm standardize` emits the lab-exchange CSV for outside tooling | Done. Keep the notebook's spirit: **never break on a new header variant silently** — show the detected mapping and let the user remap (partially exists). |
 | Load PSTrace CSV (utf-16, skiprows=5, unit columns) | Encoding/skiprow trial-and-error per file | ✅ `pstrace_csv` profile + auto-pairing of `*_PS.csv` | Done. |
 | Manual trimming (`start_idx=2`) + re-zero time per dataset | Edit a constant, re-run | ✅ per-run t0 alignment + reference range | Done, and shared selection across runs is better than the notebook ever was. |
-| **Stacked composite figure: E(t) / Δf(t) / ΔD(t), shared x, per-overtone shades, two experiments overlaid, colorblind palettes** | The notebook's flagship output (cell 5) | ⚠️ Partial — E(t) strip + one hero plot; no Δf and ΔD as *separate stacked panels* | **Gap #1.** Build a composite figure view/exporter (§4, Tier 1). |
-| Axis label carries the reference electrode ("V vs. Ag\|AgCl") | Hardcoded string | ❌ Missing — viewer says "Potential [V]" | Add `reference_electrode` to experiment params/metadata; it must flow into every potential axis, report, and export. |
+| **Stacked composite figure: E(t) / Δf(t) / ΔD(t), shared x, per-overtone shades, two experiments overlaid, colorblind palettes** | The notebook's flagship output (cell 5) | ✅ Figure page: composite builder with toggleable panels, run overlay, vector export | Done. |
+| Axis label carries the reference electrode ("V vs. Ag\|AgCl") | Hardcoded string | ✅ `reference_electrode` experiment param flows into every potential axis, Run info, and the report | Done. |
 | Crystal constants (f₀ = 4.95 MHz, ρq, µq → scale µg/C) | Redefined in every cell, drift risk | ✅ `ExperimentParams` + `sensitivity_from_f0` | Done — and provenance-visible. Add per-sensor presets so they're entered once per lab, ever (§3). |
 | Static mpe per plating/stripping cycle, multi-dataset comparison | Manual time windows per file (`start_time=0, end_time=6000`) | ✅ half-cycle MPE table, cycle filtering, multi-run | Done; CE is charge-based with time fallback (better than the notebook's time-only). |
 | Dynamic mpe (gradient Δf/ΔQ) + Savgol smoothing + twin axis | np.gradient + manual savgol params | ✅ mpe quantity + clip/smooth controls + twin axis | Done. Add uncertainty bands (§4 Tier 2). |
@@ -59,12 +59,15 @@ and how to *improve on* (not just match) each step.
 | CV zoom insets for small features | Static matplotlib insets | ✅ interactive wheel/box zoom (strictly better) | Consider "pinned zoom regions" that persist into exports so the inset survives into the figure. |
 | CV direction arrows | "Haven't added that yet" (notebook) | ✅ direction arrows | Already ahead of the notebook. |
 | Cycle wishlist (cell 4): select cycle / ranges, reset-to-origin compare, cross-dataset cycle compare, CE per cycle, mass accumulation | All listed as *future hopes* | ✅ all implemented | The viewer has fully absorbed the notebook's wishlist. |
-| Publication-grade output (fonts, sizes, vector) | matplotlib → journal-ready | ❌ PNG via Bokeh save tool only | **Gap #2.** Vector export + figure presets (§4, Tier 1). |
+| Publication-grade output (fonts, sizes, vector) | matplotlib → journal-ready | ✅ Figure page exports SVG/vector with journal presets | Done. |
 
-**Conclusion:** the viewer already covers ~85 % of the notebook and improves most
-of it. The two real parity gaps are the **composite stacked figure** and
-**publication-grade export**; the two metadata gaps are **reference electrode**
-and **per-sensor presets**. Close those and the notebook can be retired.
+**Conclusion (updated 2026-06):** every notebook step — and every wish in its
+text discussion — now exists in the viewer, usually in a stronger form
+(charge-based CE, measured-charge Faraday overlay, interactive zoom, shared
+multi-run selection). The composite figure, vector export, reference electrode,
+and per-sensor presets closed the last parity gaps; `qcm standardize` covers the
+literal CSV-conversion step for tooling outside the viewer. The notebook can be
+retired.
 
 ---
 
