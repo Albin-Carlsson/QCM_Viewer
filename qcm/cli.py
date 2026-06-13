@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 import subprocess
 import sys
-import tempfile
 
 import typer
 from rich.console import Console
@@ -232,9 +231,39 @@ def export_data(run_path: Path, output: Path, columns: list[str] = typer.Option(
     console.print(f"Exported: {out}")
 
 
+def _free_port() -> int:
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("", 0))
+        return int(s.getsockname()[1])
+
+
+def _resolve_port(requested: int) -> int:
+    """The requested port if free, otherwise a free one (with a notice).
+
+    ``--port 0`` is passed through unchanged — Panel then picks a free port and
+    opens the browser there. Any other busy port falls back gracefully instead
+    of crashing with 'address already in use'.
+    """
+    import socket
+
+    if requested == 0:
+        return 0
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind(("", requested))
+            return requested
+        except OSError:
+            pass
+    chosen = _free_port()
+    console.print(f"Port {requested} is in use — starting on {chosen} instead.")
+    return chosen
+
+
 def _serve_runs(run_dirs: list[Path], port: int, show: bool) -> None:
     cmd = [sys.executable, "-m", "panel", "serve", str(Path(__file__).parent / "panel_app.py"),
-           "--port", str(port)]
+           "--port", str(_resolve_port(port))]
     if show:
         cmd.append("--show")
     if run_dirs:
@@ -264,16 +293,19 @@ def view(
     if not source:
         _serve_runs([], port, show)
         return
+    from .store import import_or_reuse
+
     run_dirs: list[Path] = []
-    for i, src in enumerate(source):
+    for src in source:
         qcm_src, ps_src = resolve_import_target(src)
         if qcm_src.is_dir() and (qcm_src / "manifest.json").exists():
             run_dirs.append(qcm_src)
             continue
-        dest = Path(tempfile.mkdtemp(prefix="qcm_view_")) / f"{qcm_src.stem}_{i}"
         paired = f" + {ps_src.name}" if ps_src else ""
-        console.print(f"Importing {qcm_src.name}{paired} …")
-        import_run(qcm_src, dest, ps_source=ps_src, cv_scan_rate=cv_scan_rate)
+        dest, reused = import_or_reuse(qcm_src, ps_source=ps_src, cv_scan_rate=cv_scan_rate)
+        console.print(
+            f"{'Reusing saved' if reused else 'Importing'} {qcm_src.name}{paired} → {dest}"
+        )
         run_dirs.append(dest)
     _serve_runs(run_dirs, port, show)
 

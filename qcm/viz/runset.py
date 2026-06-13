@@ -141,6 +141,26 @@ class RunSet:
     def add_path(self, path: str | Path) -> int:
         return self.add_run(load_run(path))
 
+    def remove(self, slot: int) -> bool:
+        """Remove a run from the set and release its resources.
+
+        Refuses to remove the last remaining run (the viewer always has one
+        active run). When the removed run was active, the active selection falls
+        back to a neighbouring slot. ``QCMRun.close()`` releases the DuckDB
+        connection so removed runs don't leak. Returns True when a run was
+        removed.
+        """
+        if len(self.runs) <= 1 or not (0 <= slot < len(self.runs)):
+            return False
+        data = self.runs.pop(slot)
+        self._labels.pop(slot)
+        data.run.close()  # close() never raises; releases the DuckDB connection
+        if self.active_index >= len(self.runs):
+            self.active_index = len(self.runs) - 1
+        elif slot < self.active_index:
+            self.active_index -= 1
+        return True
+
     # --- session persistence ------------------------------------------------
     def to_session(self) -> dict:
         return {

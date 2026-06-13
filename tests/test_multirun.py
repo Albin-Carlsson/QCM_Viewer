@@ -54,6 +54,31 @@ def test_single_run_set_is_not_multi(tmp_path):
     assert rs.active.runset is rs
 
 
+def test_remove_run_drops_it_and_keeps_one(tmp_path):
+    rs = _two_run_set(tmp_path)
+    assert rs.remove(0) is True
+    assert rs.labels() == ["run_b"]
+    assert rs.active.info.run_id == "run_b"  # active fell back to the survivor
+    # The last run can't be removed — the viewer always has an active run.
+    assert rs.remove(0) is False
+    assert len(rs.runs) == 1
+
+
+def test_remove_active_run_shifts_active(tmp_path):
+    rs = _two_run_set(tmp_path)
+    rs.set_active(1)  # run_b active
+    rs.remove(1)
+    assert rs.active.info.run_id == "run_a"
+
+
+def test_remove_before_active_keeps_same_active(tmp_path):
+    rs = _two_run_set(tmp_path)
+    rs.set_active(1)  # run_b active
+    rs.remove(0)      # remove run_a (before active)
+    assert rs.labels() == ["run_b"]
+    assert rs.active.info.run_id == "run_b"
+
+
 # --- overlay-frame builder -------------------------------------------------
 
 def test_overlay_frame_tags_each_run(tmp_path):

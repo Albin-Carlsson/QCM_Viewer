@@ -83,7 +83,7 @@ type = "forbidden"
 source_modules = [
     "qcm.run", "qcm.ingest", "qcm.models", "qcm.profiles", "qcm.notebooks",
     "qcm.timeutil", "qcm.annotations", "qcm.log", "qcm.fileio", "qcm.sqlutil",
-    "qcm.science",
+    "qcm.store", "qcm.science",
 ]
 forbidden_modules = ["panel", "bokeh", "holoviews", "hvplot", "datashader"]
 
@@ -96,7 +96,7 @@ type = "forbidden"
 source_modules = [
     "qcm.run", "qcm.ingest", "qcm.models", "qcm.profiles", "qcm.notebooks",
     "qcm.timeutil", "qcm.annotations", "qcm.log", "qcm.fileio", "qcm.sqlutil",
-    "qcm.science",
+    "qcm.store", "qcm.science",
 ]
 forbidden_modules = ["qcm.viz"]
 
@@ -133,7 +133,7 @@ filterwarnings = [
 files = [
   "qcm/models.py", "qcm/ingest.py", "qcm/run.py", "qcm/annotations.py",
   "qcm/timeutil.py", "qcm/log.py", "qcm/fileio.py", "qcm/sqlutil.py",
-  "qcm/profiles",
+  "qcm/store.py", "qcm/profiles",
 ]
 python_version = "3.11"
 warn_unused_ignores = true

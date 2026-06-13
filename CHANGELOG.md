@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Persistent run store** — `qcm view file.csv` and the file picker now import
+  into `~/.qcm_viewer/runs/` (override: `QCM_RUNS_DIR`) instead of a temp dir,
+  so annotations, the alignment offset, experiment parameters and saved view
+  state **survive a reboot**. Reopening the same file reuses the prior run (your
+  analysis comes back); a changed source re-imports automatically
+  (`qcm/store.py`).
+- **Windows launcher** — `Start QCM Viewer.bat` mirrors the macOS `.command`
+  (one-time uv bootstrap, then `qcm view --port 0`), so lab Windows PCs get the
+  same double-click start.
+- **Remove a run from the overlay** — each run row has a quiet × control
+  (disabled when only one run remains); `RunSet.remove` closes the run's DuckDB
+  connection. Non-destructive: the imported files persist in the store, so the
+  run (and its saved annotations) can be added back.
+- **"Open other measurement…"** — switch to a different file without restarting;
+  returns to the picker (the current workspace is remembered and resumable).
+- **In-app orientation** — an always-available, collapsed **How this works**
+  card (sidebar) lays out the four-page workflow and the two concepts everything
+  hinges on (the reference range that defines Δ = 0, overtone normalisation), so
+  the tool explains itself instead of needing a written guide. The left/right
+  Y-axis and analysis-target selectors gained inline descriptions.
+
+### Changed
+- **Graceful port fallback** — a busy `--port` (default 5006) now falls back to
+  a free port with a notice instead of crashing with "address already in use".
+- **Clearer landing page** — says what the tool does, lists the supported
+  formats inline, and explains the picker's move-to-the-right step.
+
 ### Fixed
 - **Run directories under quoted paths** (e.g. ``viktor's data/``) broke every
   query with a DuckDB parser error: all embedded ``read_parquet('…')`` paths now

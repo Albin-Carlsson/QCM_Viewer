@@ -11,15 +11,21 @@ with cycle-aware electrochemistry views — all offline, on your own files.
 
 ## Quick start (no command line)
 
-**macOS:** double-click **`Start QCM Viewer.command`** in this folder. The first
-run installs everything it needs (a minute or two); after that it starts in
-seconds and opens the viewer in your browser. If macOS warns about an
-unidentified developer, right-click the file and choose *Open* the first time.
+**macOS:** double-click **`Start QCM Viewer.command`** in this folder. If macOS
+warns about an unidentified developer, right-click the file and choose *Open*
+the first time.
+
+**Windows:** double-click **`Start QCM Viewer.bat`** in this folder.
+
+The first run installs everything it needs (a minute or two); after that it
+starts in seconds and opens the viewer in your browser. Keep the launcher
+window open while you work; close it to stop the viewer.
 
 The viewer opens on a **file picker** — choose a measurement folder or
 instrument file and click *Open*. If you analysed something last time, a
 **Resume last session** button restores that workspace (runs, labels, active
-run) with one click.
+run) with one click. Imported runs are saved under `~/.qcm_viewer/runs/`, so
+your annotations and settings are still there when you reopen the same file.
 
 ## Quick start (command line)
 

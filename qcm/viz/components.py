@@ -112,6 +112,45 @@ def toolbar(*objects: pn.viewable.Viewable) -> pn.Row:
     return pn.Row(*objects, margin=0, sizing_mode="stretch_width", css_classes=["qcm-toolbar"])
 
 
+def how_it_works_card() -> pn.Card:
+    """Always-available orientation card (collapsed) — the workflow at a glance.
+
+    Replaces a written user guide with in-app help: a newcomer expands it once to
+    learn the four-page flow and the two concepts everything hinges on (the
+    reference range that defines Δ = 0, and overtone normalisation). Collapsed by
+    default so it never gets in a repeat user's way (progressive disclosure)."""
+    body = _html(
+        "<div class='qcm-howto'>"
+        "<ol class='qcm-howto-steps'>"
+        "<li><b>Data</b> — explore the run. Drag on the plot to set your "
+        "<b>analysis range</b>, and pick a flat, quiet stretch as the "
+        "<b>reference range</b> (it defines Δ = 0).</li>"
+        "<li><b>Results</b> — per-cycle mass, charge, coulombic efficiency and "
+        "mass-per-electron, with a Sauerbrey-validity check.</li>"
+        "<li><b>Figure</b> — stack E / Δf/n / ΔD into a publication figure and "
+        "export it as vector PDF/SVG.</li>"
+        "<li><b>Export</b> — a shareable HTML report, the raw data, or a "
+        "reproducible analysis notebook.</li>"
+        "</ol>"
+        "<div class='qcm-howto-keys'>"
+        "<div><b>Reference range</b> — the baseline subtracted from every Δ "
+        "(referenced) signal. Set it on a flat part of the run, or use "
+        "<i>Suggest stable window</i>.</div>"
+        "<div><b>Overtone n</b> — Δf/n divides each overtone's shift by its order "
+        "so the curves overlay when the film is rigid.</div>"
+        "<div><b>Runs</b> — the active run (●) drives the single-run views; "
+        "<i>Add run</i> overlays another for comparison.</div>"
+        "</div>"
+        "<div class='qcm-howto-tip'>Tip: every range can be set three ways — drag "
+        "on the plot, the slider beneath it, or the Start/End boxes.</div>"
+        "</div>"
+    )
+    return pn.Card(
+        body, title="How this works", collapsible=True, collapsed=True,
+        margin=0, sizing_mode="stretch_width", css_classes=["qcm-card", "qcm-howto-card"],
+    )
+
+
 # ----------------------------------------------------------- redesign atoms
 def brand(title: str = "QCM-D Viewer") -> pn.pane.HTML:
     """The product wordmark shown at the top of the sidebar."""

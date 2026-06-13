@@ -7,11 +7,12 @@ from pathlib import Path
 
 import pytest
 
-# Keep test-built viewers from overwriting the user's real remembered session
-# or saved experiment-parameter presets.
+# Keep test-built viewers from overwriting the user's real remembered session,
+# saved experiment-parameter presets, or persistent run store.
 _TEST_STATE_DIR = Path(tempfile.mkdtemp(prefix="qcm_test_"))
 os.environ.setdefault("QCM_SESSION_FILE", str(_TEST_STATE_DIR / "session.json"))
 os.environ.setdefault("QCM_PRESETS_FILE", str(_TEST_STATE_DIR / "presets.json"))
+os.environ.setdefault("QCM_RUNS_DIR", str(_TEST_STATE_DIR / "runs"))
 
 _ECHEM_RUN = Path("/tmp/real-echem-run")
 

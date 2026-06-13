@@ -115,10 +115,17 @@ html, body {
    inside the sidebar instead of overflowing (and clipping) the toggle. */
 .qcm-run-label { min-width: 0; flex: 1 1 auto; }
 .qcm-run-active, .qcm-run-pick { flex: 0 0 auto; }
+/* The compact remove (×) button: a quiet glyph that warms to a danger tint on
+   hover so it reads as destructive-but-reversible, never shouting for attention. */
+.qcm-run-remove { flex: 0 0 auto; opacity: 0.45; transition: opacity 0.12s, color 0.12s; }
+.qcm-run-row:hover .qcm-run-remove { opacity: 0.8; }
+.qcm-run-remove:hover { opacity: 1 !important; color: var(--qcm-danger-text, #b91c1c) !important; }
+.qcm-run-remove[disabled] { opacity: 0.15; }
 /* The run rows live in the fixed-width sidebar; the bulky directory browser is
    in a modal (.qcm-run-modal), so nothing here can force the sidebar wider. */
 .qcm-runs, .qcm-run-row { max-width: 100%; }
 .qcm-add-run-btn { margin-top: var(--qcm-space-2); }
+.qcm-open-other-btn { margin-top: 2px; }
 .qcm-run-modal .qcm-run-browser { min-height: 280px; }
 .qcm-import-detect { align-items: center; gap: var(--qcm-space-3); margin-top: var(--qcm-space-2); }
 .qcm-import-ok { color: var(--qcm-accent); font-size: 12px; font-weight: 600; }
@@ -245,6 +252,17 @@ html, body {
 .qcm-mode-help .r { display: flex; gap: var(--qcm-space-2); font-size: var(--qcm-fs-body); color: var(--qcm-muted); line-height: 1.4; }
 .qcm-mode-help .r .b { color: var(--qcm-text); font-weight: 700; flex: 0 0 116px; }
 .qcm-mode-help .tip { margin-top: 2px; font-size: var(--qcm-fs-caption); color: var(--qcm-faint); }
+
+/* "How this works" orientation card (sidebar, collapsed by default). */
+.qcm-howto { display: flex; flex-direction: column; gap: var(--qcm-space-3);
+  font-size: var(--qcm-fs-caption); color: var(--qcm-muted); line-height: 1.45; }
+.qcm-howto-steps { margin: 0; padding-left: 1.1em; display: flex; flex-direction: column; gap: 5px; }
+.qcm-howto-steps li { padding-left: 2px; }
+.qcm-howto-steps b, .qcm-howto-keys b { color: var(--qcm-text); }
+.qcm-howto-keys { display: flex; flex-direction: column; gap: 6px;
+  padding-top: var(--qcm-space-3); border-top: 1px solid var(--qcm-border); }
+.qcm-howto-tip { padding-top: var(--qcm-space-3); border-top: 1px solid var(--qcm-border);
+  color: var(--qcm-faint); }
 
 .qcm-selreadout { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--qcm-space-2); align-content: start; }
 .qcm-selreadout .qcm-iconstat { min-width: 0; padding: var(--qcm-space-2); gap: var(--qcm-space-2); }

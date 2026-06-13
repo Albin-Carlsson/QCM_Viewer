@@ -17,19 +17,19 @@ everything that merely *reacts* to a widget references it through ``pn.bind``
 """
 from __future__ import annotations
 
-import tempfile
 from html import escape
 from pathlib import Path
 
 import panel as pn
 
-from qcm.profiles import detect_profile, import_run, profile_kind
+from qcm.profiles import detect_profile, profile_kind
 
 from . import echem, nav
 from .actions import ViewerActions
 from .design import ACCENT_BUTTON_STYLESHEET
 from .components import (
     brand,
+    how_it_works_card,
     nav_sublabel,
     phase_list,
     phase_row,
@@ -218,7 +218,7 @@ class ViewerShell:
 
     def _runs_card_body(self, *_):
         rows = [self._run_row(slot) for slot in range(len(self.runset.runs))]
-        return pn.Column(*rows, self._add_run_control(),
+        return pn.Column(*rows, self._add_run_control(), self._open_other_control(),
                          margin=0, sizing_mode="stretch_width", css_classes=["qcm-runs-body"])
 
     def _run_row(self, slot: int):
@@ -252,18 +252,59 @@ class ViewerShell:
         )
         if not is_active:
             pick.on_click(lambda _e, s=slot: self._on_set_active(s))
+        # Remove from the overlay. The imported run files persist in the store,
+        # so this is non-destructive — the run can be added back later (and its
+        # saved annotations come with it). Disabled when only one run remains.
+        removable = len(self.runset.runs) > 1
+        remove = pn.widgets.Button(
+            icon="x", color="default", width=30, margin=0, disabled=not removable,
+            css_classes=["qcm-run-remove"],
+            description=("Remove this run from the overlay. Its imported files are kept, "
+                         "so you can add it again later."
+                         if removable else "The workspace always keeps one run."),
+        )
+        if removable:
+            remove.on_click(lambda _e, s=slot: self._on_remove_run(s))
         # Fixed toggle leads so it is always visible; the label takes the rest.
-        return pn.Row(pick, label, margin=0, sizing_mode="stretch_width",
+        return pn.Row(pick, label, remove, margin=0, sizing_mode="stretch_width",
                       css_classes=["qcm-run-row"] + (["is-active"] if is_active else []))
 
     def _add_run_control(self):
         # The directory browser is ~600px wide and would blow out the fixed
         # sidebar, so the sidebar only carries a compact button; the browser
         # itself lives in a modal (built once, mounted at the app root).
-        open_btn = pn.widgets.Button(label="Add run", icon="plus", color="default",
-                                     sizing_mode="stretch_width", css_classes=["qcm-add-run-btn"])
+        open_btn = pn.widgets.Button(
+            label="Add run", icon="plus", color="default",
+            sizing_mode="stretch_width", css_classes=["qcm-add-run-btn"],
+            description="Overlay another measurement on top of this one for "
+                        "comparison (this run stays loaded).",
+        )
         open_btn.on_click(lambda _e: self._open_add_run_modal())
         return open_btn
+
+    def _open_other_control(self):
+        """Switch to a different measurement — returns to the file picker.
+
+        Distinct from 'Add run' (which overlays): this replaces the workspace.
+        The current workspace is auto-saved, so 'Resume last session' on the
+        picker brings it right back."""
+        btn = pn.widgets.Button(
+            label="Open other…", icon="folder-open", color="default",
+            sizing_mode="stretch_width", css_classes=["qcm-open-other-btn"],
+            description="Open a different measurement. Your current workspace is "
+                        "remembered — 'Resume last session' restores it.",
+        )
+        btn.on_click(self._open_other)
+        return btn
+
+    def _open_other(self, _event=None) -> None:
+        from .app import request_landing
+
+        request_landing()
+        try:
+            pn.state.location.reload = True
+        except Exception:  # noqa: BLE001 — no live location in tests; nothing to do
+            pass
 
     # Display names + the QCM-source override choices (PS profiles attach via the
     # optional pairing, not as a run source).
@@ -433,6 +474,12 @@ class ViewerShell:
         self.actions.notify(f"Active run: {self.runset.labels()[slot]}", "info")
         self._bump_runset()
 
+    def _on_remove_run(self, slot: int) -> None:
+        label = self.runset.labels()[slot]
+        if self.runset.remove(slot):
+            self.actions.notify(f"Removed “{label}” from the overlay.", "info")
+            self._bump_runset()
+
     def _import_or_load(self, path: Path, ps, override: str, rename=None) -> None:
         """Add an already-ingested run dir directly, or import a raw instrument
         file (auto-detected, forced, or column-mapped via ``override``) then add
@@ -445,8 +492,11 @@ class ViewerShell:
         profile = None if override in ("auto", "map") else override
         if override == "map":
             profile = "standardized_csv"
-        dest = Path(tempfile.mkdtemp(prefix="qcm_import_")) / f"{path.stem}_run"
-        import_run(path, dest, profile=profile, qcm_rename=rename, ps_source=ps)
+        # Import into the persistent store (survives a reboot) and reuse a fresh
+        # prior import of the same file so its saved annotations come back.
+        from qcm.store import import_or_reuse
+
+        dest, _reused = import_or_reuse(path, ps_source=ps, profile=profile, qcm_rename=rename)
         self.runset.add_path(dest)
 
     def _on_add_run(self, selected, *, ps=None, override: str = "auto", rename=None) -> None:
@@ -488,6 +538,10 @@ class ViewerShell:
             self._nav(),
             self._runs_card(),
             self._run_info_card(),
+            # Always-available orientation (collapsed) — in-app help in place of a
+            # written guide. Sits below the run cards so it never pushes the
+            # primary controls down, but is reachable from every page.
+            how_it_works_card(),
             pn.layout.Spacer(css_classes=["qcm-sidebar-spacer"]),
             margin=0, css_classes=["qcm-sidebar"],
         )

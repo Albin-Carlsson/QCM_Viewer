@@ -400,12 +400,22 @@ class ViewerControls:
         q_value = self.saved.get("quantity", "delta_f_norm")
         if q_value not in q_options.values():
             q_value = next(iter(q_options.values()))
+        # One description string explains the whole quantity family, so a newcomer
+        # learns what each option means without leaving the control (recognition
+        # over recall — no separate guide needed).
+        _quantity_help = (
+            "What to plot on the left axis. Δf/n = frequency shift per overtone "
+            "(more negative = more mass); ΔD = dissipation (film softness); "
+            "Mass = Sauerbrey areal mass; MPE = mass deposited per electron; "
+            "Current / Potential / Charge = the electrochemistry channel."
+        )
         self.quantity_select = pn.widgets.Select(
             label="",
             options=q_options,
             value=q_value,
             sizing_mode="stretch_width",
             css_classes=["compact-select", "quantity-select"],
+            description=_quantity_help,
         )
         # --- redesign: top-of-plot toolbar widgets --------------------------
         qr_value = self.saved.get("quantity_right", "delta_D")
@@ -417,6 +427,9 @@ class ViewerControls:
             value=qr_value,
             sizing_mode="stretch_width",
             css_classes=["compact-select", "quantity-select-right"],
+            description="An optional second signal on a right-hand axis, for "
+                        "comparing two quantities against time (e.g. Δf/n vs ΔD — "
+                        "the classic QCM-D view). 'None' keeps a single axis.",
         )
         # NB: Panel's Checkbox has no `description`/tooltip, so the labels carry the
         # meaning ("y = 0 line" rather than the cryptic "Zero line").
@@ -556,6 +569,8 @@ class ViewerControls:
             value="__current__",
             sizing_mode="stretch_width",
             css_classes=["compact-select", "analysis-target-select"],
+            description="Which window the live statistics summarise: the current "
+                        "analysis range, or one of your saved phases.",
         )
 
         self.use_selection_as_baseline = pn.widgets.Button(

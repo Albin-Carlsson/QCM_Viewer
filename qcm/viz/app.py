@@ -105,12 +105,23 @@ _PENDING_SET_AT: float = 0.0
 _PENDING_TTL_S = 30.0
 
 
+# Sentinel that forces the next page load back to the file picker, used by the
+# in-app "Open other measurement…" control (the workbench can't be swapped live
+# without wedging Bokeh, so it reloads onto the landing page instead).
+_LANDING = "__landing__"
+
+
 def _set_pending(value: list[str] | str) -> None:
     global _PENDING_OPEN, _PENDING_SET_AT
     import time
 
     _PENDING_OPEN = value
     _PENDING_SET_AT = time.monotonic()
+
+
+def request_landing() -> None:
+    """Ask the next page load to show the file picker (in-app 'Open other…')."""
+    _set_pending(_LANDING)
 
 
 def _consume_pending() -> list[str] | str | None:
@@ -131,9 +142,8 @@ def _landing():
     ``_PENDING_OPEN`` and reloads the page; the next document render then builds
     the workbench as its initial payload (see the note on ``_PENDING_OPEN``).
     """
-    import tempfile
-
-    from qcm.profiles import import_run, resolve_import_target
+    from qcm.profiles import resolve_import_target
+    from qcm.store import import_or_reuse
     from .runset import peek_session
 
     _ensure_app_css()
@@ -142,7 +152,9 @@ def _landing():
         directory=str(Path.cwd()), only_files=False, sizing_mode="stretch_width",
     )
     status = pn.pane.Alert(
-        "Pick a run folder, or a QCM instrument file (.csv / .txt) or parquet, then Open.",
+        "Select a file or folder on the left, move it to the right with the » "
+        "button, then click Open. A potentiostat file next to your data is "
+        "paired automatically.",
         alert_type="light", sizing_mode="stretch_width",
     )
     open_btn = pn.widgets.Button(label="Open", color="primary", icon="folder-open")
@@ -167,8 +179,7 @@ def _landing():
                 else:
                     paired = f" + {ps_src.name}" if ps_src else ""
                     _set("light", f"Importing {qcm_src.name}{paired} …")
-                    dest = Path(tempfile.mkdtemp(prefix="qcm_view_")) / f"{qcm_src.stem}_run"
-                    import_run(qcm_src, dest, ps_source=ps_src)
+                    dest, _reused = import_or_reuse(qcm_src, ps_source=ps_src)
                     run_dirs.append(dest)
             except Exception as exc:  # noqa: BLE001
                 _set("danger", f"Could not open {src.name}: {exc}")
@@ -202,7 +213,13 @@ def _landing():
         pn.pane.HTML(
             "<div style='max-width:760px;margin:48px auto 0'>"
             "<h1 style='margin:0 0 4px'>QCM-D Viewer</h1>"
-            "<p style='color:#64748b;margin:0 0 20px'>Open a measurement to begin.</p></div>"
+            "<p style='color:#475569;margin:0 0 6px;font-size:15px'>"
+            "Analyse and visualise QCM-D and EQCM measurements — no setup.</p>"
+            "<p style='color:#64748b;margin:0 0 20px;font-size:13px'>"
+            "Opens a measurement folder, a QCM file "
+            "(<b>Qsoft .txt</b> or standardized <b>.csv</b>), a parquet, or an "
+            "already-imported run. A potentiostat <b>_PS.csv</b> beside your data "
+            "is detected and paired for you.</p></div>"
         ),
         pn.Column(*resume_row, browser, pn.Row(open_btn, margin=0), status,
                   css_classes=["qcm-card"], margin=(0, 0, 0, 0),
@@ -214,6 +231,8 @@ def _landing():
 
 def app(run_path: str | list[str] | None = None):
     pending = _consume_pending()
+    if pending == _LANDING:
+        return _landing()
     if pending == "resume":
         from .runset import load_session
 
