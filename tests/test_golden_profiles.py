@@ -13,6 +13,7 @@ from pathlib import Path
 
 import polars as pl
 import pytest
+from polars.testing import assert_frame_equal
 
 from qcm.profiles import detect_profile, import_run, profile_kind
 
@@ -34,12 +35,16 @@ def test_golden_import_is_stable(case: Path, tmp_path):
         assert detect_profile(ps) == expected["ps_profile"]
         assert profile_kind(expected["ps_profile"]) == "ps"
 
-    # …and a full import reproduces the canonical run table exactly.
+    # …and a full import reproduces the canonical run table. Float columns are
+    # compared with a tight tolerance, not bit-exactly: the import pipeline
+    # (np.interp, cum_sum, trapezoids) drifts by ULPs across CPU architectures,
+    # and the goldens were generated on arm64 while CI also runs x86_64. Any
+    # real reader drift is orders of magnitude above these tolerances.
     import_run(src, tmp_path / "run", ps_source=ps)
     got = pl.read_parquet(str(tmp_path / "run" / "raw" / "*.parquet")).sort(["timestamp", "group"])
     want = pl.read_parquet(case / "expected.parquet")
     assert got.columns == want.columns
-    assert got.equals(want), f"{case.name}: imported table drifted from golden"
+    assert_frame_equal(got, want, rtol=1e-9, atol=1e-12)
     assert sorted(int(g) for g in got["group"].unique().to_list()) == expected["groups"]
 
     # Capability flags and the CP echem sidecar are part of the contract.
