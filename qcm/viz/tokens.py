@@ -17,6 +17,34 @@ else under ``qcm/viz``, it has drifted from the system.
 """
 from __future__ import annotations
 
+import re
+
+# --- global UI scale -------------------------------------------------------
+# Every size token below is an absolute px value chosen on a 4px grid, so on its
+# own nothing scales together. ``UI_SCALE`` is the single knob that makes the
+# whole interface denser: ``root_css()`` multiplies every ``<n>px`` size token by
+# it, and the plot-height constants below are scaled the same way, so chrome,
+# type, controls, and plots shrink in lockstep — the effect of a browser zoom,
+# but done in real layout pixels (CSS ``zoom`` breaks Bokeh's responsive sizing,
+# which measures the container through the zoom and mis-fits the canvas).
+# 1.0 = the original sizes; 0.8 matches the "80% zoom" the UI reads best at.
+# Source tokens stay on the 4px grid; only the *emitted* values are scaled.
+UI_SCALE = 0.8
+
+_PX_RE = re.compile(r"^(\d+(?:\.\d+)?)px$")
+
+
+def _spx(value: str) -> str:
+    """Scale a bare ``<n>px`` token by :data:`UI_SCALE`; pass anything else through."""
+    m = _PX_RE.match(value)
+    return f"{max(1, round(float(m.group(1)) * UI_SCALE))}px" if m else value
+
+
+def _si(n: int) -> int:
+    """Scale a pixel constant (plot heights/gaps) by :data:`UI_SCALE`."""
+    return max(1, round(n * UI_SCALE))
+
+
 # --- palette ---------------------------------------------------------------
 # Keyed by the CSS token suffix (``bg`` -> ``--qcm-bg``). Order is preserved in
 # the rendered :root block.
@@ -95,11 +123,11 @@ def root_css() -> str:
     """Render the ``:root`` custom-property block from the token tables."""
     lines = ["  color-scheme: light only;"]
     lines += [f"  --qcm-{name}: {value};" for name, value in COLORS.items()]
-    lines += [f"  --qcm-space-{k}: {v};" for k, v in SPACE.items()]
-    lines += [f"  --qcm-radius-{k}: {v};" for k, v in RADIUS.items()]
+    lines += [f"  --qcm-space-{k}: {_spx(v)};" for k, v in SPACE.items()]
+    lines += [f"  --qcm-radius-{k}: {_spx(v)};" for k, v in RADIUS.items()]
     lines += [f"  --qcm-shadow-{k}: {v};" for k, v in SHADOW.items()]
-    lines += [f"  --qcm-{k}: {v};" for k, v in LAYOUT.items()]
-    lines += [f"  --qcm-{k}: {v};" for k, v in TYPE.items()]
+    lines += [f"  --qcm-{k}: {_spx(v)};" for k, v in LAYOUT.items()]
+    lines += [f"  --qcm-{k}: {_spx(v)};" for k, v in TYPE.items()]
     lines += [f"  --qcm-{k}: {v};" for k, v in EXTRA.items()]
     lines += [f"  --qcm-font: {FONT};", f"  --qcm-mono: {MONO};"]
     body = "\n".join(lines)
@@ -121,15 +149,18 @@ HEADER_BG = COLORS["text"]
 GRID = "#eef2f7"
 
 # --- plot sizing (kept here so pages stay consistent) ----------------------
-HERO_HEIGHT = 380           # full-run QCM-D overview/reference plots
-PLOT_HEIGHT = 340           # main analysis timelines
-COMPACT_PLOT_HEIGHT = 220   # secondary/fingerprint plots
-RESULTS_PLOT_HEIGHT = 420   # the single headline plot on the Results page
-SWEEP_PANEL_HEIGHT = 260    # one raw sweep panel
-WATERFALL_PANEL_HEIGHT = 320
+# Scaled by UI_SCALE so plots get denser in lockstep with the chrome. Plots are
+# `responsive=True` (width fills the card natively); only their height is fixed,
+# so scaling the height is what shrinks them to match an 80%-zoom feel.
+HERO_HEIGHT = _si(380)           # full-run QCM-D overview/reference plots
+PLOT_HEIGHT = _si(340)           # main analysis timelines
+COMPACT_PLOT_HEIGHT = _si(220)   # secondary/fingerprint plots
+RESULTS_PLOT_HEIGHT = _si(420)   # the single headline plot on the Results page
+SWEEP_PANEL_HEIGHT = _si(260)    # one raw sweep panel
+WATERFALL_PANEL_HEIGHT = _si(320)
 
-SECTION_GAP = 8
-CARD_PADDING = 8
+SECTION_GAP = _si(8)
+CARD_PADDING = _si(8)
 
 # --- data colors -----------------------------------------------------------
 # Reference-region (baseline) and event annotation colors.

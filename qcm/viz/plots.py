@@ -29,7 +29,7 @@ from .theme import (
     color_for_run_overtone,
     color_for_slot,
 )
-from .tokens import CYCLE_BAND_COLOR, HEADER_BG, INK_SOFT
+from .tokens import CYCLE_BAND_COLOR, FONT, HEADER_BG, INK_SOFT, SURFACE, UI_SCALE
 
 X = ELAPSED_COLUMN
 X_LABEL = "Time [s]"
@@ -285,8 +285,20 @@ def cycle_band_elements(spans) -> list:
     return elements
 
 
+_CYCLE_LABEL_FONT_SIZE = f"{max(9, round(12 * UI_SCALE))}px"
+
+
 def _cycle_label_hook(spans):
-    """Draw a small ``C{n}`` marker at the top of each cycle band."""
+    """Draw a bold ``C{n}`` marker centered on each cycle band.
+
+    Each marker sits over its band so the cycles read as C0, C1, … rather than
+    just alternating colors. Styled as a legible chip (dark bold text on a
+    near-opaque white pill) so it stays readable over the curves and the faint
+    bands — the original faint slate label, drawn in the band color, was easy to
+    miss. Anchored a few px up from the frame's bottom in screen space (reliable
+    regardless of the autoscaled y-range). With many cycles the labels are thinned
+    evenly (the bands still mark every cycle) so the row never overlaps.
+    """
     def hook(plot, _element):
         if not spans:
             return
@@ -294,15 +306,19 @@ def _cycle_label_hook(spans):
             from bokeh.models import Label
 
             fig = plot.state
-            for item in spans:
+            max_labels = 28
+            step = max(1, (len(spans) + max_labels - 1) // max_labels)
+            for item in spans[::step]:
                 try:
                     cyc, x0, x1 = int(item[0]), float(item[1]), float(item[2])
                 except (TypeError, ValueError, IndexError):
                     continue
                 fig.add_layout(Label(
-                    x=(x0 + x1) / 2, y=4, x_units="data", y_units="screen",
-                    text=f"C{cyc}", text_font_size="8pt", text_color=_CYCLE_BAND_COLOR,
-                    text_align="center", text_baseline="bottom", text_alpha=0.85,
+                    x=(x0 + x1) / 2, y=6, x_units="data", y_units="screen",
+                    text=f"C{cyc}", text_font=FONT, text_font_size=_CYCLE_LABEL_FONT_SIZE,
+                    text_font_style="bold", text_color=INK_SOFT,
+                    background_fill_color=SURFACE, background_fill_alpha=0.78,
+                    border_line_alpha=0.0, text_align="center", text_baseline="bottom",
                 ))
         except Exception:
             pass
