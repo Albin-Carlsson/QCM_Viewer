@@ -30,6 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Y-axis and analysis-target selectors gained inline descriptions.
 
 ### Changed
+- **Denser interface** — a single `UI_SCALE` knob (0.8) scales every size token,
+  the Bokeh theme's font sizes, and the fixed plot heights in lockstep, giving
+  the whole app the density it reads best at without browser zoom (CSS `zoom`
+  breaks Bokeh's responsive canvas sizing). Cycle band markers are now legible
+  chips (bold ink on a translucent pill) and thin out instead of overlapping
+  when a run has many cycles.
 - **Graceful port fallback** — a busy `--port` (default 5006) now falls back to
   a free port with a notice instead of crashing with "address already in use".
 - **Clearer landing page** — says what the tool does, lists the supported
