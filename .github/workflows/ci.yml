@@ -23,10 +23,13 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-      - name: Install Ruff
-        run: uv pip install --system "ruff>=0.5"
+      # Install from uv.lock (not a fresh resolve) so CI runs the same tool
+      # versions that were verified locally — new upstream releases land via a
+      # deliberate lock bump, never mid-PR.
+      - name: Install package + dev deps (locked)
+        run: uv sync --locked --extra dev --python 3.12
       - name: Lint
-        run: ruff check .
+        run: uv run ruff check .
 
   arch:
     name: Architecture (import-linter)
@@ -40,12 +43,14 @@ jobs:
         with:
           enable-cache: true
       # import-linter builds the import graph, so the package must be installed.
-      - name: Install package + dev deps
-        run: uv pip install --system -e ".[dev]"
+      # Locked install: a fresh resolve once pulled a numpy whose stubs need the
+      # py3.12 `type` statement, breaking mypy's python_version=3.11 check.
+      - name: Install package + dev deps (locked)
+        run: uv sync --locked --extra dev --python 3.12
       - name: Enforce layering contracts
-        run: lint-imports
+        run: uv run lint-imports
       - name: Type-check the core (mypy)
-        run: mypy
+        run: uv run mypy
 
   test:
     name: Tests (${{ matrix.os }} · py${{ matrix.python-version }})
@@ -66,7 +71,7 @@ jobs:
           enable-cache: true
       # The test suite is self-contained: conftest synthesizes the EQCM run it
       # needs, so no external data or browser is required.
-      - name: Install package + dev deps
-        run: uv pip install --system -e ".[dev]"
+      - name: Install package + dev deps (locked)
+        run: uv sync --locked --extra dev --python ${{ matrix.python-version }}
       - name: Run tests
-        run: python -m pytest -q --cov=qcm --cov-report=term-missing --cov-fail-under=70
+        run: uv run python -m pytest -q --cov=qcm --cov-report=term-missing --cov-fail-under=70
