@@ -32,7 +32,7 @@ env/
 # Jupyter
 .ipynb_checkpoints/
 qcm_view.ipynb
-qcm_region_analysis.ipynb
+qcm_region_analysis*.ipynb
 
 # Generated / regenerable data (see README: qcm demo-data / qcm ingest)
 demo_raw/
