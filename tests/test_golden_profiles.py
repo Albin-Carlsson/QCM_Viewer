@@ -44,7 +44,7 @@ def test_golden_import_is_stable(case: Path, tmp_path):
     got = pl.read_parquet(str(tmp_path / "run" / "raw" / "*.parquet")).sort(["timestamp", "group"])
     want = pl.read_parquet(case / "expected.parquet")
     assert got.columns == want.columns
-    assert_frame_equal(got, want, rtol=1e-9, atol=1e-12)
+    assert_frame_equal(got, want, rel_tol=1e-9, abs_tol=1e-12)
     assert sorted(int(g) for g in got["group"].unique().to_list()) == expected["groups"]
 
     # Capability flags and the CP echem sidecar are part of the contract.

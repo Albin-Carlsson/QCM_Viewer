@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+from pathlib import Path
 
 import pytest
 
@@ -78,4 +79,6 @@ def test_viewer_records_session(tmp_path, monkeypatch):
 
     QCMViewer([_REAL_RUN])
     assert session.exists()
-    assert rs.peek_session(session)[0]["path"] == _REAL_RUN
+    # Same directory, not same string: the session store round-trips the path
+    # through Path, which renders with backslashes on Windows.
+    assert Path(rs.peek_session(session)[0]["path"]) == Path(_REAL_RUN)
