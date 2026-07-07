@@ -8,12 +8,15 @@ from typing import Iterable, Any
 import duckdb
 import polars as pl
 
+from .log import get_logger
 from .models import Manifest, TimelineResult, Annotation
+from .sqlutil import sql_path
 from .timeutil import parse_time, choose_level
 from .annotations import load_annotations, create_annotation, save_annotations
-from . import derived as derived_mod
 
 SWEEP_TIMELINE_COLUMNS = {"fit_center", "fit_gamma", "fit_fwhm"}
+
+_log = get_logger("run")
 
 
 class QCMRun:
@@ -30,6 +33,27 @@ class QCMRun:
         # The sweep index is static for a run; cache the unfiltered read so the
         # app's repeated calls (init, tap-to-jump, readouts) hit memory.
         self._sweep_index_full: pl.DataFrame | None = None
+        self._echem_stream: pl.DataFrame | None = None
+
+    def close(self) -> None:
+        """Release the DuckDB connection and cached frames.
+
+        Safe to call more than once. Runs opened for a quick read (CLI exports,
+        temp-dir imports) and runs removed from a live run set should be closed
+        so connections don't accumulate until garbage collection.
+        """
+        try:
+            self.conn.close()
+        except Exception:  # noqa: BLE001 — double-close/teardown must never raise
+            pass
+        self._sweep_index_full = None
+        self._echem_stream = None
+
+    def __enter__(self) -> "QCMRun":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
 
     @property
     def time_start(self) -> int:
@@ -41,11 +65,69 @@ class QCMRun:
 
     @property
     def columns(self) -> list[str]:
-        return self.manifest.columns
+        """Columns the run can serve, including echem channels held in the
+        sidecar stream (derived on read). Listing the stream's roles here means
+        capability checks (has_echem, available axes/quantities) and the echem
+        read path all see the cell channels without special-casing."""
+        cols = list(self.manifest.columns)
+        for role in self.echem_stream_roles:
+            if role not in cols:
+                cols.append(role)
+        return cols
+
+    # --- echem stream (retained raw potentiostat channels) ----------------
+    @property
+    def _echem_path(self) -> Path:
+        return self.path / self.manifest.paths.echem
+
+    @property
+    def has_echem_stream(self) -> bool:
+        return self._echem_path.exists()
+
+    def echem_stream(self) -> pl.DataFrame:
+        """The retained raw cell stream ``[time_s, <roles>]`` (empty if none).
+
+        ``time_s`` is elapsed seconds zeroed at the stream's first sample; the
+        data layer interpolates the roles onto the QCM clock at
+        ``time_s + ps_offset_s``."""
+        if not self.has_echem_stream:
+            return pl.DataFrame()
+        if self._echem_stream is None:
+            self._echem_stream = pl.read_parquet(self._echem_path)
+        return self._echem_stream
+
+    @property
+    def echem_stream_roles(self) -> tuple[str, ...]:
+        if not self.has_echem_stream:
+            return ()
+        return tuple(c for c in self.echem_stream().columns if c != "time_s")
+
+    @property
+    def ps_offset_s(self) -> float:
+        return float(getattr(self.manifest, "ps_offset_s", 0.0) or 0.0)
+
+    def set_ps_offset(self, seconds: float) -> None:
+        """Persist the PS↔QCM alignment offset to the manifest (re-applied on read)."""
+        self.manifest.ps_offset_s = float(seconds)
+        self.manifest.save(self.path)
 
     @property
     def groups(self) -> list[int]:
         return self.manifest.groups
+
+    @property
+    def capabilities(self) -> list[str]:
+        """Explicit capability flags ("raw", "echem", "temperature")."""
+        return list(self.manifest.capabilities)
+
+    @property
+    def has_raw(self) -> bool:
+        """Whether the run carries raw frequency-point sweep data.
+
+        Fit-only runs (e.g. imported Qsoft Fr/D exports) have no raw sweeps, so
+        the sweep inspector and waterfall are unavailable.
+        """
+        return "raw" in self.manifest.capabilities
 
     def overtone_orders(self) -> dict[int, int]:
         """Infer the overtone order n for each group from resonance frequencies.
@@ -57,7 +139,8 @@ class QCMRun:
         """
         try:
             idx = self.sweep_index()
-        except Exception:
+        except Exception:  # noqa: BLE001 — a missing/corrupt index degrades to n=1
+            _log.exception("overtone_orders: sweep index unreadable for %s", self.path)
             return {g: 1 for g in self.groups}
         if idx.is_empty():
             return {g: 1 for g in self.groups}
@@ -77,6 +160,42 @@ class QCMRun:
             return str(self.path / self.manifest.paths.raw / "*.parquet")
         return str(self.path / self.manifest.paths.pyramid / level / "*.parquet")
 
+    @staticmethod
+    def _read_from(path: str | Path) -> str:
+        """``read_parquet('…')`` with the path escaped as a SQL literal.
+
+        DuckDB cannot bind the path as a parameter, so every embedded path must
+        go through :func:`qcm.sqlutil.sql_path` — folder names with quotes
+        (``viktor's data``) are routine and would otherwise break every query.
+        """
+        return f"read_parquet('{sql_path(path)}')"
+
+    @staticmethod
+    def _where_time_groups(t0: int, t1: int, groups: list[int] | None) -> tuple[str, list[object]]:
+        """Shared ``WHERE timestamp BETWEEN … [AND group IN …]`` clause + params."""
+        sql = " WHERE timestamp >= ? AND timestamp <= ?"
+        params: list[object] = [int(t0), int(t1)]
+        if groups:
+            sql += ' AND "group" IN (' + ",".join("?" for _ in groups) + ")"
+            params.extend(int(g) for g in groups)
+        return sql, params
+
+    def _read_timeline_from(
+        self,
+        path: str | Path,
+        columns: list[str],
+        t0: int,
+        t1: int,
+        groups: list[int] | None,
+    ) -> pl.DataFrame:
+        """Timeline read shared by the pyramid/raw and sweep-index paths."""
+        wanted = ["timestamp"] + (["group"] if "group" not in columns else []) + columns
+        wanted = list(dict.fromkeys(wanted))
+        col_sql = ", ".join(f'"{c}"' for c in wanted)
+        where, params = self._where_time_groups(t0, t1, groups)
+        sql = f"SELECT {col_sql} FROM {self._read_from(path)}{where} ORDER BY timestamp, \"group\""
+        return self.conn.execute(sql, params).pl()
+
     def _read_parquet(
         self,
         level: str,
@@ -84,35 +203,11 @@ class QCMRun:
         t0: int,
         t1: int,
         groups: list[int] | None,
-        order_by: str = 'timestamp, "group"',
     ) -> pl.DataFrame:
-        path = self._parquet_glob(level)
-        wanted = ["timestamp"] + (["group"] if "group" not in columns else []) + columns
-        wanted = list(dict.fromkeys(wanted))
-        col_sql = ", ".join(f'"{c}"' for c in wanted)
-        sql = f"SELECT {col_sql} FROM read_parquet('{path}') WHERE timestamp >= ? AND timestamp <= ?"
-        params: list[object] = [int(t0), int(t1)]
-        if groups:
-            placeholders = ",".join("?" for _ in groups)
-            sql += f" AND \"group\" IN ({placeholders})"
-            params.extend([int(g) for g in groups])
-        if order_by:
-            sql += f" ORDER BY {order_by}"
-        return self.conn.execute(sql, params).pl()
+        return self._read_timeline_from(self._parquet_glob(level), columns, t0, t1, groups)
 
     def _read_sweep_timeline(self, columns: list[str], t0: int, t1: int, groups: list[int] | None) -> pl.DataFrame:
-        path = self.path / self.manifest.paths.sweeps
-        wanted = ["timestamp"] + (["group"] if "group" not in columns else []) + columns
-        wanted = list(dict.fromkeys(wanted))
-        col_sql = ", ".join(f'"{c}"' for c in wanted)
-        sql = f"SELECT {col_sql} FROM read_parquet('{path}') WHERE timestamp >= ? AND timestamp <= ?"
-        params: list[object] = [int(t0), int(t1)]
-        if groups:
-            placeholders = ",".join("?" for _ in groups)
-            sql += f" AND \"group\" IN ({placeholders})"
-            params.extend([int(g) for g in groups])
-        sql += ' ORDER BY timestamp, "group"'
-        return self.conn.execute(sql, params).pl()
+        return self._read_timeline_from(self.path / self.manifest.paths.sweeps, columns, t0, t1, groups)
 
     def timeline(
         self,
@@ -143,38 +238,29 @@ class QCMRun:
         meta = TimelineResult(level=reported_level, t0=start, t1=end, columns=cols, row_count=df.height, elapsed_ms=elapsed)
         return (df, meta) if include_meta else df
 
+    def _resolve_sequence(self, sequence: int | None, timestamp: int | str | None) -> int:
+        """The given sequence, or the last sequence at/before ``timestamp``."""
+        if sequence is not None:
+            return int(sequence)
+        if timestamp is None:
+            raise ValueError("Provide sequence or timestamp")
+        t = parse_time(timestamp)
+        sql = (
+            f"SELECT sequence FROM {self._read_from(self._parquet_glob('raw'))} "
+            "WHERE timestamp <= ? ORDER BY timestamp DESC LIMIT 1"
+        )
+        row = self.conn.execute(sql, [t]).fetchone()
+        if row is None:
+            raise ValueError("No sweep found near timestamp")
+        return int(row[0])
+
     def sweep(self, sequence: int | None = None, timestamp: int | str | None = None, group: int | None = None) -> pl.DataFrame:
-        raw_path = self._parquet_glob("raw")
-        if sequence is None:
-            if timestamp is None:
-                raise ValueError("Provide sequence or timestamp")
-            t = parse_time(timestamp)
-            sql = f"SELECT sequence FROM read_parquet('{raw_path}') WHERE timestamp <= ? ORDER BY timestamp DESC LIMIT 1"
-            row = self.conn.execute(sql, [t]).fetchone()
-            if row is None:
-                raise ValueError("No sweep found near timestamp")
-            sequence = int(row[0])
-        sql = f"SELECT * FROM read_parquet('{raw_path}') WHERE sequence = ?"
-        params: list[object] = [int(sequence)]
-        if group is not None:
-            sql += " AND \"group\" = ?"
-            params.append(int(group))
-        sql += ' ORDER BY "group", frequency'
-        return self.conn.execute(sql, params).pl()
+        return self.sweeps_at(sequence, timestamp, [int(group)] if group is not None else None)
 
     def sweeps_at(self, sequence: int | None = None, timestamp: int | str | None = None, groups: list[int] | None = None) -> pl.DataFrame:
         """Return all selected group curves for one sequence/timestamp."""
-        raw_path = self._parquet_glob("raw")
-        if sequence is None:
-            if timestamp is None:
-                raise ValueError("Provide sequence or timestamp")
-            t = parse_time(timestamp)
-            sql = f"SELECT sequence FROM read_parquet('{raw_path}') WHERE timestamp <= ? ORDER BY timestamp DESC LIMIT 1"
-            row = self.conn.execute(sql, [t]).fetchone()
-            if row is None:
-                raise ValueError("No sweep found near timestamp")
-            sequence = int(row[0])
-        sql = f"SELECT * FROM read_parquet('{raw_path}') WHERE sequence = ?"
+        sequence = self._resolve_sequence(sequence, timestamp)
+        sql = f"SELECT * FROM {self._read_from(self._parquet_glob('raw'))} WHERE sequence = ?"
         params: list[object] = [int(sequence)]
         if groups:
             sql += " AND \"group\" IN (" + ",".join("?" for _ in groups) + ")"
@@ -186,15 +272,13 @@ class QCMRun:
         is_full = t0 is None and t1 is None and not groups
         if is_full and self._sweep_index_full is not None:
             return self._sweep_index_full
-        path = self.path / self.manifest.paths.sweeps
         start = parse_time(t0, self.time_start)
         end = parse_time(t1, self.time_end)
-        sql = f"SELECT * FROM read_parquet('{path}') WHERE timestamp >= ? AND timestamp <= ?"
-        params: list[object] = [start, end]
-        if groups:
-            sql += " AND \"group\" IN (" + ",".join("?" for _ in groups) + ")"
-            params.extend([int(g) for g in groups])
-        sql += ' ORDER BY timestamp, "group"'
+        where, params = self._where_time_groups(start, end, groups)
+        sql = (
+            f"SELECT * FROM {self._read_from(self.path / self.manifest.paths.sweeps)}{where}"
+            ' ORDER BY timestamp, "group"'
+        )
         df = self.conn.execute(sql, params).pl()
         if is_full:
             self._sweep_index_full = df
@@ -210,46 +294,24 @@ class QCMRun:
         """Per-group mean of a raw value expression over a time window, in SQL.
 
         ``value_expr`` is a DuckDB scalar expression over the raw fit columns
-        (e.g. ``fit_center`` or ``fit_fwhm / fit_center * 1e6``). DuckDB prunes
-        row groups by the ``timestamp`` predicate and only the per-group average
-        crosses into Python, so a referenced quantity no longer materializes the
-        whole baseline window. Returns ``[group, baseline]`` — the exact mean,
-        identical to averaging the per-row values in Polars.
+        (e.g. ``fit_center`` or ``fit_fwhm / fit_center * 1e6``). It is
+        interpolated into the SQL, so it must come from trusted code — pass only
+        the internal expressions built by :func:`qcm.science.transforms.raw_value_sql`,
+        never user input. DuckDB prunes row groups by the ``timestamp`` predicate
+        and only the per-group average crosses into Python, so a referenced
+        quantity no longer materializes the whole baseline window. Returns
+        ``[group, baseline]`` — the exact mean, identical to averaging the
+        per-row values in Polars.
         """
-        raw_path = self._parquet_glob("raw")
         start = parse_time(t0, self.time_start)
         end = parse_time(t1, self.time_end)
+        where, params = self._where_time_groups(start, end, groups)
         sql = (
             f'SELECT "group", avg({value_expr})::DOUBLE AS baseline '
-            f"FROM read_parquet('{raw_path}') WHERE timestamp >= ? AND timestamp <= ?"
+            f"FROM {self._read_from(self._parquet_glob('raw'))}{where}"
+            ' GROUP BY "group" ORDER BY "group"'
         )
-        params: list[object] = [int(start), int(end)]
-        if groups:
-            sql += " AND \"group\" IN (" + ",".join("?" for _ in groups) + ")"
-            params.extend([int(g) for g in groups])
-        sql += ' GROUP BY "group" ORDER BY "group"'
         return self.conn.execute(sql, params).pl()
-
-    def region_stats(
-        self,
-        columns: list[str],
-        t0: int | str | None = None,
-        t1: int | str | None = None,
-        groups: list[int] | None = None,
-    ) -> pl.DataFrame:
-        df = self.timeline(columns, t0=t0, t1=t1, groups=groups, level="raw")
-        if df.is_empty():
-            return pl.DataFrame()
-        aggs: list[Any] = []
-        for c in columns:
-            aggs.extend([
-                pl.col(c).mean().alias(f"{c}_mean"),
-                pl.col(c).std().alias(f"{c}_std"),
-                pl.col(c).min().alias(f"{c}_min"),
-                pl.col(c).max().alias(f"{c}_max"),
-                (pl.col(c).last() - pl.col(c).first()).alias(f"{c}_delta"),
-            ])
-        return df.group_by("group").agg(aggs).sort("group")
 
     def frequency_band(
         self,
@@ -260,18 +322,18 @@ class QCMRun:
         groups: list[int] | None = None,
         columns: list[str] | None = None,
     ) -> pl.DataFrame:
-        raw_path = self._parquet_glob("raw")
         start = parse_time(t0, self.time_start)
         end = parse_time(t1, self.time_end)
         columns = columns or ["timestamp", "sequence", "group", "frequency", "conductance", "susceptance", "raw_i", "raw_q"]
         wanted = list(dict.fromkeys(columns))
         col_sql = ", ".join(f'"{c}"' for c in wanted)
-        sql = f"SELECT {col_sql} FROM read_parquet('{raw_path}') WHERE timestamp >= ? AND timestamp <= ? AND frequency >= ? AND frequency <= ?"
-        params: list[object] = [start, end, float(f0), float(f1)]
-        if groups:
-            sql += " AND \"group\" IN (" + ",".join("?" for _ in groups) + ")"
-            params.extend([int(g) for g in groups])
-        sql += ' ORDER BY timestamp, "group", frequency'
+        where, params = self._where_time_groups(start, end, groups)
+        sql = (
+            f"SELECT {col_sql} FROM {self._read_from(self._parquet_glob('raw'))}{where}"
+            " AND frequency >= ? AND frequency <= ?"
+            ' ORDER BY timestamp, "group", frequency'
+        )
+        params.extend([float(f0), float(f1)])
         return self.conn.execute(sql, params).pl()
 
     def annotations(self, t0: int | str | None = None, t1: int | str | None = None, tags: list[str] | None = None) -> list[Annotation]:
@@ -292,18 +354,6 @@ class QCMRun:
         anns = [a for a in load_annotations(self.path) if a.id != annotation_id]
         save_annotations(self.path, anns)
 
-    def derived(self, name: str, t0=None, t1=None, groups: list[int] | None = None, harmonic: int | None = None) -> pl.DataFrame:
-        base = self.timeline(["fit_center", "fit_fwhm", "fit_gamma"], t0=t0, t1=t1, groups=groups, level="raw")
-        if name == "sauerbrey_mass":
-            return derived_mod.sauerbrey_mass(base, harmonic=harmonic)
-        if name == "quality_factor":
-            return derived_mod.quality_factor(base)
-        if name == "dissipation":
-            return derived_mod.dissipation(base)
-        if name == "delta_f":
-            return derived_mod.delta_f(base)
-        raise ValueError(f"Unknown derived quantity: {name}")
-
     def export_data(self, output: str | Path, columns: list[str], t0=None, t1=None, groups: list[int] | None = None, fmt: str = "parquet") -> Path:
         df = self.timeline(columns, t0=t0, t1=t1, groups=groups, level="raw")
         out = Path(output)
@@ -315,9 +365,9 @@ class QCMRun:
         return out
 
     def save_view_state(self, state: dict[str, Any]) -> Path:
-        out = self.path / "viewer_state.json"
-        out.write_text(json.dumps(state, indent=2))
-        return out
+        from .fileio import write_text_atomic
+
+        return write_text_atomic(self.path / "viewer_state.json", json.dumps(state, indent=2))
 
     def load_view_state(self) -> dict[str, Any]:
         path = self.path / "viewer_state.json"
@@ -325,7 +375,8 @@ class QCMRun:
             return {}
         try:
             return json.loads(path.read_text())
-        except Exception:
+        except (OSError, ValueError) as exc:
+            _log.warning("Ignoring unreadable viewer state at %s: %s", path, exc)
             return {}
 
     def to_notebook(
@@ -337,6 +388,7 @@ class QCMRun:
         groups: list[int] | None = None,
         region_label: str = "current range",
         quantity_key: str = "sauerbrey_mass",
+        params: dict | None = None,
     ) -> Path:
         from .notebooks import write_analysis_notebook
 
@@ -349,6 +401,7 @@ class QCMRun:
             groups=groups,
             region_label=region_label,
             quantity_key=quantity_key,
+            params=params,
         )
 
 

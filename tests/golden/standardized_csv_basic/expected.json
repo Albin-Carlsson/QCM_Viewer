@@ -1,0 +1,17 @@
+{
+  "profile": "standardized_csv",
+  "kind": "qcm",
+  "columns": [
+    "timestamp",
+    "sequence",
+    "group",
+    "fit_center",
+    "fit_fwhm",
+    "frequency"
+  ],
+  "groups": [
+    1,
+    3
+  ],
+  "n_rows": 20
+}

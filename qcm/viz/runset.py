@@ -1,0 +1,332 @@
+"""Multi-run support: a run set + the overlay-frame builder.
+
+A :class:`RunSet` holds one or more loaded runs, each wrapped in its own
+:class:`~qcm.viz.data.QCMViewData` so it keeps an independent baseline
+reference, time origin, and query cache. One run is *active*: every single-run
+view (raw sweeps, report, results) operates on it exactly as before. The
+overlay views consume :meth:`RunSet.overlay_value_df`, which applies the shared
+view selection to every run and stacks the results into one long-form frame
+tagged with a run identifier.
+
+Each run is aligned to its own start (``value_df`` derives elapsed seconds from
+that run's ``t0_us``) and referenced to its own baseline window, so the shared
+selection — a quantity, a time range in seconds-from-start, a baseline window —
+is meaningful across runs that were recorded at different wall-clock times.
+"""
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+
+import polars as pl
+
+from qcm.log import get_logger
+from qcm.run import QCMRun, open_run
+
+from . import echem
+from .data import QCMViewData
+from .state import RunInfo, ViewState
+
+_US = 1_000_000
+
+_log = get_logger("viz.runset")
+
+# Where the last workspace (run paths + labels + active run) is remembered, so
+# a comparison session survives an app restart. Override with QCM_SESSION_FILE
+# (tests point it at a tmp dir so they never touch the user's real session).
+_DEFAULT_SESSION_FILE = Path.home() / ".qcm_viewer" / "last_session.json"
+
+
+def session_file() -> Path:
+    override = os.environ.get("QCM_SESSION_FILE")
+    return Path(override) if override else _DEFAULT_SESSION_FILE
+
+
+def read_run_info(run: QCMRun) -> RunInfo:
+    """Stable per-run facts used by controls, headers, and elapsed-time math."""
+    groups = run.groups or [0]
+    orders = run.overtone_orders()
+    t0_us = run.time_start
+    t1_us = run.time_end
+    span_s = max((t1_us - t0_us) / _US, 1e-6)
+    try:
+        idx = run.sweep_index()
+        fmin = float(idx["frequency_min"].min())
+        fmax = float(idx["frequency_max"].max())
+        seq_min = int(idx["sequence"].min())
+        seq_max = int(idx["sequence"].max())
+        n_sweeps = int(idx["sequence"].n_unique())
+    except Exception:  # noqa: BLE001 — fit-only runs lack these columns; degrade, log
+        _log.debug("read_run_info: no raw sweep stats for %s (fit-only run?)", run.path)
+        fmin, fmax = 0.0, 1.0
+        seq_min = seq_max = n_sweeps = 0
+    return RunInfo(
+        run_id=run.id,
+        groups=groups,
+        orders=orders,
+        t0_us=t0_us,
+        t1_us=t1_us,
+        span_s=span_s,
+        fmin=fmin,
+        fmax=fmax,
+        seq_min=seq_min,
+        seq_max=seq_max,
+        n_sweeps=n_sweeps,
+        rows=run.manifest.metadata.get("rows", "?"),
+        has_echem=echem.has_echem(run.columns),
+        columns=list(run.columns),
+    )
+
+
+def load_run(path: str | Path) -> QCMViewData:
+    """Open one run directory and wrap it in a data service."""
+    run = open_run(path)
+    return QCMViewData(run, read_run_info(run))
+
+
+class RunSet:
+    """An ordered collection of loaded runs with one active.
+
+    The active run drives every single-run view; the whole set drives the
+    overlay views. Each run carries a stable ``run_slot`` (its index in the set)
+    that the colour system maps to a hue family, so a run keeps the same colour
+    regardless of which run is active.
+    """
+
+    def __init__(self, runs: list[QCMViewData], active: int = 0):
+        if not runs:
+            raise ValueError("RunSet needs at least one run")
+        self.runs = runs
+        self.active_index = max(0, min(active, len(runs) - 1))
+        # Editable display labels, seeded from each run's id. Legends, tables, and
+        # the run-manager card read these; the id stays the stable identity.
+        self._labels = [d.info.run_id for d in runs]
+        # Back-reference so a step holding only the active data service can reach
+        # the full set (and decide whether to overlay) without a wider signature.
+        for d in runs:
+            d.runset = self
+
+    @classmethod
+    def from_paths(cls, paths: list[str | Path], active: int = 0) -> "RunSet":
+        return cls([load_run(p) for p in paths], active=active)
+
+    @property
+    def active(self) -> QCMViewData:
+        return self.runs[self.active_index]
+
+    @property
+    def is_multi(self) -> bool:
+        return len(self.runs) > 1
+
+    def labels(self) -> list[str]:
+        return list(self._labels)
+
+    def set_label(self, slot: int, text: str) -> None:
+        text = (text or "").strip()
+        if 0 <= slot < len(self._labels) and text:
+            self._labels[slot] = text
+
+    def set_active(self, slot: int) -> None:
+        if 0 <= slot < len(self.runs):
+            self.active_index = slot
+
+    def add_run(self, data: QCMViewData) -> int:
+        """Append a loaded run; returns its slot (new colour family)."""
+        data.runset = self
+        self.runs.append(data)
+        self._labels.append(data.info.run_id)
+        return len(self.runs) - 1
+
+    def add_path(self, path: str | Path) -> int:
+        return self.add_run(load_run(path))
+
+    def remove(self, slot: int) -> bool:
+        """Remove a run from the set and release its resources.
+
+        Refuses to remove the last remaining run (the viewer always has one
+        active run). When the removed run was active, the active selection falls
+        back to a neighbouring slot. ``QCMRun.close()`` releases the DuckDB
+        connection so removed runs don't leak. Returns True when a run was
+        removed.
+        """
+        if len(self.runs) <= 1 or not (0 <= slot < len(self.runs)):
+            return False
+        data = self.runs.pop(slot)
+        self._labels.pop(slot)
+        data.run.close()  # close() never raises; releases the DuckDB connection
+        if self.active_index >= len(self.runs):
+            self.active_index = len(self.runs) - 1
+        elif slot < self.active_index:
+            self.active_index -= 1
+        return True
+
+    # --- session persistence ------------------------------------------------
+    def to_session(self) -> dict:
+        return {
+            "version": 1,
+            "active": self.active_index,
+            "runs": [
+                {"path": str(d.run.path), "label": self._labels[i]}
+                for i, d in enumerate(self.runs)
+            ],
+        }
+
+    def save_session(self, path: str | Path | None = None) -> Path | None:
+        """Remember this workspace; best-effort (never raises into the UI)."""
+        from qcm.fileio import write_text_atomic
+
+        target = Path(path) if path else session_file()
+        try:
+            return write_text_atomic(target, json.dumps(self.to_session(), indent=2))
+        except OSError:
+            return None
+
+    def overlay_value_df(
+        self,
+        state: ViewState,
+        quantity_key: str | None = None,
+        x_axis: str | None = None,
+    ) -> pl.DataFrame:
+        """Apply the shared selection to every run and stack the results.
+
+        Returns a long-form frame with the per-run ``value_df`` columns plus a
+        ``run`` label and integer ``run_slot``. Each run is computed against its
+        own time origin and baseline, so curves overlay on a common
+        seconds-from-start / referenced axis. Empty runs (no data in range) are
+        dropped; an all-empty set yields an empty frame.
+        """
+        frames: list[pl.DataFrame] = []
+        for slot, d in enumerate(self.runs):
+            df, _ = d.value_df(state, quantity_key, x_axis)
+            if df.is_empty():
+                continue
+            frames.append(
+                df.with_columns(
+                    pl.lit(self._labels[slot]).alias("run"),
+                    pl.lit(slot, dtype=pl.Int32).alias("run_slot"),
+                )
+            )
+        if not frames:
+            return pl.DataFrame()
+        return pl.concat(frames, how="diagonal_relaxed")
+
+    def overlay_region_summary(self, state: ViewState) -> pl.DataFrame:
+        """Per-channel headline summary stacked across runs (``run``/``run_slot``).
+
+        Each run is summarized over the shared analysis range against its own
+        baseline, giving one row set per run × overtone channel for the
+        cross-run comparison table.
+        """
+        frames: list[pl.DataFrame] = []
+        for slot, d in enumerate(self.runs):
+            summary = d.region_summary(state)
+            if summary.is_empty():
+                continue
+            frames.append(
+                summary.with_columns(
+                    pl.lit(self._labels[slot]).alias("run"),
+                    pl.lit(slot, dtype=pl.Int32).alias("run_slot"),
+                )
+            )
+        if not frames:
+            return pl.DataFrame()
+        return pl.concat(frames, how="diagonal_relaxed")
+
+
+def peek_session(path: str | Path | None = None) -> list[dict]:
+    """The still-loadable run entries of the remembered session (no run I/O).
+
+    Entries whose run directory has vanished (e.g. temp-dir imports) are
+    dropped. Empty list = nothing to resume.
+    """
+    target = Path(path) if path else session_file()
+    try:
+        payload = json.loads(target.read_text())
+    except (OSError, ValueError):
+        return []
+    out = []
+    for entry in payload.get("runs", []):
+        p = Path(str(entry.get("path", "")))
+        if (p / "manifest.json").exists():
+            out.append({"path": str(p), "label": str(entry.get("label", p.name))})
+    return out
+
+
+def load_session(path: str | Path | None = None) -> "RunSet | None":
+    """Rebuild the remembered workspace, or ``None`` when nothing loads."""
+    target = Path(path) if path else session_file()
+    entries = peek_session(target)
+    if not entries:
+        return None
+    try:
+        payload = json.loads(target.read_text())
+        active_path = None
+        runs_meta = payload.get("runs", [])
+        idx = int(payload.get("active", 0))
+        if 0 <= idx < len(runs_meta):
+            active_path = str(runs_meta[idx].get("path"))
+    except (OSError, ValueError):
+        active_path = None
+    runs = []
+    labels = []
+    for entry in entries:
+        try:
+            runs.append(load_run(entry["path"]))
+            labels.append(entry["label"])
+        except Exception:  # noqa: BLE001 — a broken run dir must not kill resume
+            continue
+    if not runs:
+        return None
+    active = 0
+    if active_path is not None:
+        for i, d in enumerate(runs):
+            if str(d.run.path) == active_path:
+                active = i
+                break
+    rs = RunSet(runs, active=active)
+    for i, label in enumerate(labels):
+        rs.set_label(i, label)
+    return rs
+
+
+class ActiveRunView:
+    """Transparent stand-in for the run set's active :class:`QCMViewData`.
+
+    Every single-run view (raw-sweep drawer, report/export, results dashboard)
+    holds one of these instead of a fixed run, so flipping the active-run
+    selector repoints them all without rebuilding their wiring. Attribute access
+    delegates to ``runset.active``; overlay views still reach the whole set via
+    the delegated ``.runset`` back-reference.
+    """
+
+    def __init__(self, runset: "RunSet"):
+        object.__setattr__(self, "_rs", runset)
+
+    def __getattr__(self, name):
+        return getattr(self._rs.active, name)
+
+    def __setattr__(self, name, value):
+        # Assignment through the proxy would silently land on the proxy object
+        # (not the active run) and vanish on the next active-run flip — always a
+        # bug. Mutate runset.active directly instead.
+        raise AttributeError(
+            f"ActiveRunView is read-only (tried to set {name!r}); "
+            "mutate runset.active instead."
+        )
+
+
+class ActiveAttrProxy:
+    """Follow one attribute of the active run (e.g. its ``run`` or ``info``)."""
+
+    def __init__(self, get):
+        object.__setattr__(self, "_get", get)
+
+    def __getattr__(self, name):
+        return getattr(self._get(), name)
+
+    def __setattr__(self, name, value):
+        raise AttributeError(
+            f"ActiveAttrProxy is read-only (tried to set {name!r}); "
+            "mutate the proxied object directly."
+        )

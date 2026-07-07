@@ -1,18 +1,32 @@
 [project]
-name = "qcm-refactor"
+name = "qcm-viewer"
 version = "0.3.0"
-description = "Interactive QCM-D viewer built with Panel, HoloViews, Polars, and DuckDB."
+description = "Interactive QCM-D and EQCM viewer built with Panel, HoloViews, Polars, and DuckDB."
 readme = "README.md"
 requires-python = ">=3.11"
+license = { text = "PolyForm-Noncommercial-1.0.0" }
+authors = [
+  { name = "Albin Carlsson", email = "albin.carlsson@protonmail.com" },
+  { name = "Uppsala University" },
+]
+keywords = ["QCM-D", "EQCM", "quartz crystal microbalance", "electrochemistry", "electrogravimetry"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Science/Research",
+  "License :: Other/Proprietary License",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Chemistry",
+  "Topic :: Scientific/Engineering :: Visualization",
+]
 dependencies = [
   "bokeh>=3.4",
-  "datashader>=0.16",
   "duckdb>=1.0",
   "holoviews>=1.19",
   "hvplot>=0.10",
-  "jupyterlab>=4.0",
-  "jupyter-bokeh>=4.0",
-  "ipykernel>=6.29",
+  "matplotlib>=3.8",
   "nbformat>=5.10",
   "numpy>=1.26",
   "pandas>=2.2",
@@ -20,12 +34,16 @@ dependencies = [
   "polars>=1.0",
   "pyarrow>=16.0",
   "pydantic>=2.7",
+  "scipy>=1.11",
   "rich>=13.7",
   "typer>=0.12",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.5"]
+# Writing a .ipynb needs only nbformat (a core dependency); these give the
+# user an environment that can *run* the exported analysis notebook locally.
+notebook = ["jupyterlab>=4.0", "jupyter-bokeh>=4.0", "ipykernel>=6.29"]
+dev = ["pytest>=8", "pytest-cov>=5", "ruff>=0.5", "import-linter>=2.0", "mypy>=1.10"]
 
 [project.scripts]
 qcm = "qcm.cli:app"
@@ -35,6 +53,94 @@ include = ["qcm*"]
 
 [tool.ruff]
 line-length = 110
+# Reference and scratch notebooks are exploratory artefacts, not maintained code.
+extend-exclude = ["*.ipynb"]
+
+[tool.ruff.lint]
+# Default rule set (pyflakes F + pycodestyle E/W) plus BLE001: blind
+# `except Exception` is banned in the core/science/data layers — every broad
+# catch there must be narrowed, or logged and annotated with a reasoned noqa
+# (ADR 0006). The UI render surfaces are exempted in per-file-ignores below:
+# returning an inline alert instead of blanking the page *is* their documented
+# policy, and errors.surface_error/guarded route those through the logger.
+extend-select = ["BLE001"]
+
+[tool.importlinter]
+# Enforce the layering the ADRs promise (ADR 0001/0002): the pure science layer
+# and the core data/IO layer never depend on the UI. Run with `lint-imports`.
+root_package = "qcm"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Pure science layer is UI-free"
+type = "forbidden"
+source_modules = ["qcm.science"]
+forbidden_modules = ["panel", "bokeh", "holoviews", "hvplot", "datashader"]
+
+[[tool.importlinter.contracts]]
+name = "Core data/IO layer never pulls rendering libraries"
+type = "forbidden"
+source_modules = [
+    "qcm.run", "qcm.ingest", "qcm.models", "qcm.profiles", "qcm.notebooks",
+    "qcm.timeutil", "qcm.annotations", "qcm.log", "qcm.fileio", "qcm.sqlutil",
+    "qcm.store", "qcm.science",
+]
+forbidden_modules = ["panel", "bokeh", "holoviews", "hvplot", "datashader"]
+
+[[tool.importlinter.contracts]]
+# Storage/model/profile/science modules never reach the viz package at all.
+# (The notebook export reuses qcm.science, so qcm.run and qcm.notebooks are now
+# held to the same rule — the old carve-out for qcm.viz.science is gone.)
+name = "Storage, model, and science layers are viz-free"
+type = "forbidden"
+source_modules = [
+    "qcm.run", "qcm.ingest", "qcm.models", "qcm.profiles", "qcm.notebooks",
+    "qcm.timeutil", "qcm.annotations", "qcm.log", "qcm.fileio", "qcm.sqlutil",
+    "qcm.store", "qcm.science",
+]
+forbidden_modules = ["qcm.viz"]
+
+[tool.ruff.lint.per-file-ignores]
+# Test bodies and one-off tooling scripts favour compact, multi-statement lines
+# (e.g. `a = make(); b = make()` setup) — readable in context, not worth
+# splitting. Lint everything else strictly.
+"tests/*" = ["E701", "E702", "BLE001"]
+"tools/*" = ["E701", "E702", "BLE001"]
+# UI render surfaces: a failed plot/table returns an inline alert instead of
+# blanking the page (ADR 0006); surface_error/guarded log every one of these,
+# and cosmetic Bokeh render hooks may no-op on upstream API drift.
+"qcm/viz/steps/*" = ["BLE001"]
+"qcm/viz/plots.py" = ["BLE001"]
+"qcm/viz/shell.py" = ["BLE001"]
+"qcm/viz/controls.py" = ["BLE001"]
+"qcm/viz/actions.py" = ["BLE001"]
+"qcm/viz/app.py" = ["BLE001"]
+"qcm/viz/components.py" = ["BLE001"]
+"qcm/viz/nav.py" = ["BLE001"]
+"qcm/viz/errors.py" = ["BLE001"]
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    # Ratchet: the deprecated button_type= was swept to color= (Panel 2.0);
+    # any reintroduction fails the suite instead of drowning in warnings.
+    "error:button_type is deprecated",
+]
+
+[tool.mypy]
+# Typing is enforced on the pure core (storage, models, profiles, science-side
+# helpers) where it pays; the Panel/Bokeh UI layer is excluded — its widget
+# wiring is dynamically typed by nature and is covered by tests instead.
+files = [
+  "qcm/models.py", "qcm/ingest.py", "qcm/run.py", "qcm/annotations.py",
+  "qcm/timeutil.py", "qcm/log.py", "qcm/fileio.py", "qcm/sqlutil.py",
+  "qcm/store.py", "qcm/profiles",
+]
+python_version = "3.11"
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+check_untyped_defs = true
+ignore_missing_imports = true
 
 [build-system]
 requires = ["setuptools>=68"]

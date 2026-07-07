@@ -3,10 +3,16 @@ from __future__ import annotations
 
 import io
 import tempfile
+from dataclasses import replace
 
+import polars as pl
+
+from . import science
 from .controls import ViewerControls
 from .data import QCMViewData
+from .design import ACCENT_BUTTON_STYLESHEET
 from .state import RunInfo
+from .theme import axis
 
 _US = 1_000_000
 
@@ -22,6 +28,7 @@ class ViewerActions:
         self._wire_buttons()
         self._build_exports()
         self.refresh_marker_options()
+        self.controls.analysis_region_select.param.watch(self.apply_analysis_region, "value")
 
     def _wire_buttons(self) -> None:
         self.controls.mark_window_button.on_click(self.add_window_marker)
@@ -29,6 +36,7 @@ class ViewerActions:
         self.controls.save_state_button.on_click(self.save_state)
         self.controls.use_selection_as_baseline.on_click(self.sync_baseline_to_selection)
         self.controls.revert_baseline.on_click(self.revert_baseline)
+        self.controls.suggest_baseline_button.on_click(self.suggest_baseline)
 
     def _build_exports(self) -> None:
         import panel as pn
@@ -37,14 +45,15 @@ class ViewerActions:
             label="⬇ Current range data (.parquet)",
             filename="qcm_current_range_data.parquet",
             callback=self.data_file,
-            button_type="default",
+            color="default",
             sizing_mode="stretch_width",
         )
         self.export_nb_dl = pn.widgets.FileDownload(
             label="⬇ Notebook for chosen region",
             filename="qcm_region_analysis.ipynb",
             callback=self.notebook_file,
-            button_type="primary",
+            color="primary",
+            stylesheets=[ACCENT_BUTTON_STYLESHEET],
             sizing_mode="stretch_width",
         )
 
@@ -66,7 +75,13 @@ class ViewerActions:
 
     def add_window_marker(self, _event=None) -> None:
         state = self.controls.state()
-        t0, t1 = state.t_us(self.info.t0_us)
+        if hasattr(self.controls, "mark_range"):
+            start_s, end_s = (float(v) for v in self.controls.mark_range.value)
+            t0 = int(self.info.t0_us + start_s * _US)
+            t1 = int(self.info.t0_us + end_s * _US)
+        else:
+            t0, t1 = state.t_us(self.info.t0_us)
+            start_s, end_s = state.t_range_s
         f0, f1 = state.frequency_band
         label = self._marker_label()
         kind = self.controls.region_type.value
@@ -82,11 +97,15 @@ class ViewerActions:
         self.controls.annotation_version.value += 1
         self.controls.region_label.value = ""
         self.refresh_marker_options()
-        self.notify(f"Saved region “{label}” for the current range.", "success")
+        self.notify(f"Saved phase “{label}” ({start_s:,.2f}–{end_s:,.2f} s).", "success")
 
     def add_point_marker(self, _event=None) -> None:
         state = self.controls.state()
-        mid_s = (state.t_range_s[0] + state.t_range_s[1]) / 2
+        if hasattr(self.controls, "mark_range"):
+            start_s, end_s = (float(v) for v in self.controls.mark_range.value)
+            mid_s = (start_s + end_s) / 2
+        else:
+            mid_s = (state.t_range_s[0] + state.t_range_s[1]) / 2
         t = int(self.info.t0_us + mid_s * _US)
         label = self._marker_label()
         kind = self.controls.region_type.value
@@ -116,6 +135,19 @@ class ViewerActions:
             opts[f"{ann.label} · {kind} · {start_s:.1f}–{end_s:.1f} s"] = ann.id
         self.controls.marker_select.options = opts
         self.controls.marker_select.value = current if current in opts.values() else "__current__"
+        if hasattr(self.controls, "analysis_region_select"):
+            analysis_current = self.controls.analysis_region_select.value
+            self.controls.analysis_region_select.options = opts
+            self.controls.analysis_region_select.value = analysis_current if analysis_current in opts.values() else "__current__"
+
+    def apply_analysis_region(self, event=None) -> None:
+        """Refresh dependent views when Quantify target changes.
+
+        Deliberately do not copy saved markers into the Current range slider.
+        Quantify derives its view state from the selected target directly, so
+        switching back to Current range shows the real live current range again.
+        """
+        self.controls.annotation_version.value += 1
 
     def delete_annotation_by_row(self, row: int) -> None:
         try:
@@ -148,6 +180,47 @@ class ViewerActions:
             "success",
         )
 
+    def suggest_baseline(self, _event=None) -> None:
+        """Fill the reference range with the flattest stretch near the run start.
+
+        Reads the absolute resonance frequency over the whole run (its local
+        variance measures stability regardless of any baseline), finds the
+        quietest window in the first part of the run, and proposes it as the
+        reference range. It is a suggestion: the user can accept or nudge it.
+        """
+        try:
+            span = float(self.info.span_s)
+            if span <= 0:
+                self.notify("Run has no time span to search.", "warning")
+                return
+            state = self.controls.state()
+            full = replace(state, t_range_s=(0.0, span))
+            vdf, _ = self.data.value_df(full, "fit_center", "time")
+            if vdf.is_empty() or "value" not in vdf.columns:
+                self.notify("No resonance signal to find a stable window from.", "warning")
+                return
+            agg = (vdf.group_by("timestamp").agg(pl.col("value").mean().alias("v"))
+                   .sort("timestamp"))
+            t = (agg["timestamp"].to_numpy() - self.info.t0_us) / _US
+            # A baseline is a short quiet stretch early in the run: search the
+            # first ~40 %, with a window ~5 % of the run (min 1 s).
+            width_s = min(max(span * 0.05, 1.0), span)
+            window = science.stablest_window(
+                t, agg["v"].to_numpy(), width_s=width_s, search_end_s=span * 0.4,
+            )
+            if window is None:
+                self.notify("Couldn't find a stable window automatically — set it by hand.", "warning")
+                return
+            lo, hi = window
+            self.controls.set_reference_range_values(lo, hi)
+            self.notify(
+                f"Suggested reference range {lo:,.2f}–{hi:,.2f} s "
+                "(flattest early stretch). Adjust if needed.",
+                "success",
+            )
+        except Exception as exc:
+            self.notify(f"Baseline suggestion failed: {exc}", "error")
+
     def revert_baseline(self, _event=None) -> None:
         if self.controls._last_baseline is None:
             self.notify("No previous zero/reference range to restore.", "warning")
@@ -164,6 +237,50 @@ class ViewerActions:
     def save_state(self, _event=None) -> None:
         out = self.run.save_view_state(self.controls.state().to_persisted_dict())
         self.notify(f"Saved workspace → {out.name}", "success")
+
+    def apply_brush(self, boundsx=None) -> None:
+        """Set the current or zero/reference range from a plot box-selection.
+
+        ``boundsx`` is the ``(x0, x1)`` tuple emitted by an ``hv.streams.BoundsX``
+        stream in elapsed seconds. Which range it targets is chosen by the
+        ``brush_mode`` toggle so the same gesture can define either the analysis
+        window or the baseline without a second slider.
+        """
+        if not boundsx:
+            return
+        try:
+            lo, hi = sorted(float(v) for v in boundsx)
+        except (TypeError, ValueError):
+            return
+        if abs(hi - lo) < 1e-9:
+            return
+        # On a non-time (but monotonic, e.g. cycle-number) x-axis the brush is in
+        # that unit; map it to the enclosing analysis time window. The selection
+        # state is always seconds, so everything downstream is unchanged.
+        x_axis = getattr(self.controls.state(), "x_axis", "time")
+        x_note = ""
+        if x_axis != "time":
+            window = self.data.time_window_for_x(x_axis, lo, hi)
+            if window is None:
+                self.notify("No data in the selected range.", "warning")
+                return
+            ax = axis(x_axis)
+            x_note = f" ({ax.label.lower()} {lo:g}–{hi:g} {ax.unit})".rstrip()
+            lo, hi = window
+        mode = self.controls.brush_mode.value
+        if mode == "reference":
+            previous = tuple(float(v) for v in self.controls.baseline_range.value)
+            if previous != (lo, hi):
+                self.controls._last_baseline = previous
+                self.controls.revert_baseline.disabled = False
+            self.controls.set_reference_range_values(lo, hi)
+            self.notify(f"Reference range set to {lo:,.2f}–{hi:,.2f} s{x_note}.", "success")
+        elif mode == "mark":
+            self.controls.set_mark_range_values(lo, hi)
+            self.notify(f"Mark range set to {lo:,.2f}–{hi:,.2f} s{x_note}. Name it and save phase.", "success")
+        else:
+            self.controls.set_current_range_values(lo, hi)
+            self.notify(f"Analysis range set to {lo:,.2f}–{hi:,.2f} s{x_note}.", "success")
 
     def jump_to_seconds(self, seconds) -> None:
         if seconds is None:
@@ -208,5 +325,6 @@ class ViewerActions:
             groups=state.groups,
             region_label=label,
             quantity_key=state.quantity,
+            params=state.params.to_dict(),
         )
         return open(tmp.name, "rb")

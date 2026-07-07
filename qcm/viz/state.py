@@ -1,8 +1,17 @@
 """Typed view state for the QCM Panel UI."""
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any
+
+from .theme import (
+    DEFAULT_PARAMS,
+    DESPIKE_WINDOW_DEFAULT,
+    MPE_CLIP_HI_DEFAULT,
+    MPE_CLIP_LO_DEFAULT,
+    MPE_SMOOTH_WINDOW_DEFAULT,
+    ExperimentParams,
+)
 
 _US = 1_000_000
 
@@ -23,6 +32,8 @@ class RunInfo:
     seq_max: int
     n_sweeps: int
     rows: int | str = "?"
+    has_echem: bool = False
+    columns: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -30,7 +41,8 @@ class ViewState:
     """Complete UI state needed to render plots/tables/export data."""
 
     groups: list[int]
-    quantity: str
+    quantity: str  # selected y-axis quantity key
+    x_axis: str  # selected x-axis dimension key (see theme.AXES)
     t_range_s: tuple[float, float]
     baseline_s: tuple[float, float]
     orders: dict[int, int]
@@ -41,6 +53,22 @@ class ViewState:
     frequency_band: tuple[float, float]
     annotation_label: str = ""
     annotation_version: int = 0
+    overtone_controls: dict[str, dict[str, bool]] = field(default_factory=dict)
+    params: ExperimentParams = DEFAULT_PARAMS
+    # MPE display controls (apply only to the mass-per-electron quantity).
+    mpe_smooth: bool = False
+    mpe_window: int = MPE_SMOOTH_WINDOW_DEFAULT
+    mpe_clip: bool = True
+    mpe_clip_lo: float = MPE_CLIP_LO_DEFAULT
+    mpe_clip_hi: float = MPE_CLIP_HI_DEFAULT
+    mpe_target_show: bool = True
+    # Hampel despike of resonance traces (applies to f/D/mass-family quantities).
+    despike: bool = False
+    despike_window: int = DESPIKE_WINDOW_DEFAULT
+    # Baseline drift correction: subtract a trend fitted over the reference window
+    # (order 1 = linear, 2 = quadratic). Applies to the referenced resonance family.
+    detrend: bool = False
+    detrend_order: int = 1
 
     def t_us(self, t0_us: int) -> tuple[int, int]:
         start, end = self.t_range_s

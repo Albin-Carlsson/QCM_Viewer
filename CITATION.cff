@@ -1,0 +1,31 @@
+cff-version: 1.2.0
+message: "If you use this software in your research, please cite it as below."
+title: "QCM Viewer"
+abstract: >-
+  A local, file-backed interactive viewer and analysis tool for QCM-D and
+  electrochemical QCM (EQCM) measurements. Imports raw instrument exports
+  (Qsoft .txt, standardized CSV, PSTrace potentiostat CSV) and computes
+  Δf/n, ΔD, Sauerbrey mass, charge, current density, and mass-per-electron
+  with cycle-aware electrochemistry views, multi-run overlay, and
+  reproducible notebook export.
+type: software
+authors:
+  - given-names: Albin
+    family-names: Carlsson
+    email: albin.carlsson@protonmail.com
+  - name: "Uppsala University"
+    city: Uppsala
+    country: SE
+license: LicenseRef-PolyForm-Noncommercial-1.0.0
+version: 0.3.0
+date-released: "2026-06-10"
+repository-code: "https://github.com/Albin-Carlsson/QCM_Viewer"
+keywords:
+  - QCM-D
+  - EQCM
+  - quartz crystal microbalance
+  - electrochemistry
+  - electrogravimetry
+  - Sauerbrey
+  - coulombic efficiency
+  - mass per electron
